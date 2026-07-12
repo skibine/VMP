@@ -128,12 +128,34 @@ func (s *Store) ArchiveVM(ctx context.Context, id int64) error {
 
 // region FUNC_DeleteVM [DOMAIN(8): Storage; CONCEPT(7): Delete; TECH(5): database/sql]
 // @purpose Physically delete a VM (owner operation; gated by auth in a later slice).
-// @complexity 3
+// @complexity 5
 // endregion FUNC_DeleteVM
+// STRUCTURE: ▶ ┌vmID┐ → ⊖ check_results(by check) → ⊖ checks → ⊖ metric_samples → ⊖ vms(cascade creds/hostkeys) → ⎷
 func (s *Store) DeleteVM(ctx context.Context, id int64) error {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM vms WHERE id=?`, id)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("DeleteVM: %w", err)
+		return fmt.Errorf("DeleteVM: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// check_results and metric_samples have NO foreign keys; checks FK is SET NULL. Clean them up
+	// explicitly so deleting a VM removes ALL its history (checks, results, metrics) — the
+	// vm_credentials/vm_hostkeys rows are removed by their ON DELETE CASCADE on the vms delete.
+	stmts := []string{
+		`DELETE FROM check_results WHERE check_id IN (SELECT id FROM checks WHERE vm_id = ?)`,
+		`DELETE FROM checks WHERE vm_id = ?`,
+		`DELETE FROM metric_samples WHERE vm_id = ?`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("DeleteVM: cleanup: %w", err)
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM vms WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("DeleteVM: vms: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("DeleteVM: commit: %w", err)
 	}
 	return rowsAffected(res, "DeleteVM", id)
 }

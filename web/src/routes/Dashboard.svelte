@@ -17,6 +17,10 @@
   function onSelect(e) {
     selectedId = e.detail
   }
+  function onVmDeleted() {
+    selectedId = null
+    listKey++
+  }
 
   async function logout() {
     await api.logout()
@@ -45,7 +49,7 @@
         <VmList {selectedId} on:select={onSelect} on:changed={onVmChanged} key={listKey} />
       </section>
       <section class="overflow-auto hud-grid min-h-0">
-        <VmDetail vmId={selectedId} on:changed={onVmChanged} />
+        <VmDetail vmId={selectedId} on:changed={onVmChanged} on:deleted={onVmDeleted} />
       </section>
       <aside class="hud-panel border-y-0 border-r-0 min-h-0">
         <ChatPanel />
