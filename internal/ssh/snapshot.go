@@ -35,6 +35,8 @@ const snapshotCMD = `echo =mem=; free -m; echo =df=; df -hP /; echo =up=; uptime
 type Snapshot struct {
 	MemTotalMB  int     `json:"mem_total_mb"`
 	MemUsedMB   int     `json:"mem_used_mb"`
+	SwapTotalMB int     `json:"swap_total_mb"`
+	SwapUsedMB  int     `json:"swap_used_mb"`
 	DiskTotalGB float64 `json:"disk_total_gb"`
 	DiskUsedGB  float64 `json:"disk_used_gb"`
 	Load1       float64 `json:"load1"`
@@ -74,30 +76,54 @@ func (d *Dialer) Snapshot(ctx context.Context, client *gossh.Client) (Snapshot, 
 
 var (
 	reMem  = regexp.MustCompile(`(?m)^Mem:\s+(\d+)\s+(\d+)`)
+	reSwap = regexp.MustCompile(`(?m)^Swap:\s+(\d+)\s+(\d+)`)
 	reDF   = regexp.MustCompile(`(?m)^\S+\s+([\d.]+)([KMGT])\s+([\d.]+)([KMGT])\s+[\d.]+[KMGT]?\s+[\d.]+%\s+/`)
 	reLoad = regexp.MustCompile(`(\d+\.?\d*)\s+(\d+\.?\d*)\s+(\d+\.?\d*)`)
 	reUp   = regexp.MustCompile(`up\s+(.+?),\s+\d+\s+users?`)
 )
 
+// splitSections parses "=tag=\n...\n=tag2=" framed output into a tag->content map. Shared by the
+// snapshot and inventory parsers; tolerant of missing sections.
+func splitSections(out string) map[string]string {
+	res := map[string]string{}
+	for off := 0; off < len(out); {
+		i := strings.Index(out[off:], "=")
+		if i < 0 {
+			break
+		}
+		i += off
+		end := strings.IndexByte(out[i:], '\n')
+		if end < 0 {
+			break
+		}
+		tag := strings.Trim(out[i:i+end], "=")
+		bodyStart := i + end + 1
+		next := strings.Index(out[bodyStart:], "\n=")
+		var body string
+		if next < 0 {
+			body = out[bodyStart:]
+		} else {
+			body = out[bodyStart : bodyStart+next]
+		}
+		res[tag] = body
+		off = bodyStart + len(body) + 1
+	}
+	return res
+}
+
 // parseSnapshot splits the combined output by section markers and extracts metrics tolerantly.
 func parseSnapshot(out string) Snapshot {
 	var s Snapshot
-	section := func(tag string) string {
-		marker := "=" + tag + "="
-		i := strings.Index(out, marker)
-		if i < 0 {
-			return ""
-		}
-		rest := out[i+len(marker):]
-		if j := strings.Index(rest, "\n="); j >= 0 {
-			return rest[:j]
-		}
-		return rest
-	}
+	sec := splitSections(out)
+	section := func(tag string) string { return sec[tag] }
 
 	if m := reMem.FindStringSubmatch(section("mem")); len(m) == 3 {
 		s.MemTotalMB, _ = strconv.Atoi(m[1])
 		s.MemUsedMB, _ = strconv.Atoi(m[2])
+	}
+	if m := reSwap.FindStringSubmatch(section("mem")); len(m) == 3 {
+		s.SwapTotalMB, _ = strconv.Atoi(m[1])
+		s.SwapUsedMB, _ = strconv.Atoi(m[2])
 	}
 	if m := reDF.FindStringSubmatch(section("df")); len(m) == 5 {
 		s.DiskTotalGB = toGB(m[1], m[2])
@@ -119,7 +145,37 @@ func parseSnapshot(out string) Snapshot {
 	return s
 }
 
-// toGB converts a "df -h" magnitude+unit (e.g. "40","G") into gigabytes.
+// region FUNC_Dialer_Collect [DOMAIN(8): Observability; CONCEPT(8): Collect; TECH(8): ssh]
+// @purpose One-stop metric collection for a VM: dial, run the snapshot, and map it to the flat
+//
+//	metric_samples names used by the poller / push pipeline. Closes the SSH client.
+//
+// @io (ctx, vmID) -> (map[string]float64, error)
+// @complexity 5
+// endregion FUNC_Dialer_Collect
+func (d *Dialer) Collect(ctx context.Context, vmID int64) (map[string]float64, error) {
+	client, _, err := d.Dial(ctx, vmID)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	s, err := d.Snapshot(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]float64{
+		"mem_used_mb":   float64(s.MemUsedMB),
+		"mem_total_mb":  float64(s.MemTotalMB),
+		"swap_used_mb":  float64(s.SwapUsedMB),
+		"swap_total_mb": float64(s.SwapTotalMB),
+		"disk_used_gb":  s.DiskUsedGB,
+		"disk_total_gb": s.DiskTotalGB,
+		"load1":         s.Load1,
+		"load5":         s.Load5,
+		"load15":        s.Load15,
+		"cpu_count":     float64(s.CPUCount),
+	}, nil
+}
 func toGB(val, unit string) float64 {
 	n, _ := strconv.ParseFloat(val, 64)
 	switch strings.ToUpper(unit) {

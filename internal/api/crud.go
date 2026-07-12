@@ -26,12 +26,14 @@ import (
 	"strconv"
 
 	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
 // crudAPI holds dependencies for CRUD handlers.
 type crudAPI struct {
 	st     *store.Store
+	dialer *ssh.Dialer
 	logger *slog.Logger
 }
 
@@ -40,7 +42,7 @@ type crudAPI struct {
 // @complexity 3
 // endregion FUNC_RegisterCRUD
 func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
-	a := &crudAPI{st: st, logger: logger}
+	a := &crudAPI{st: st, dialer: ssh.New(st, logger), logger: logger}
 
 	// VMs (with soft-delete archive endpoint).
 	mux.HandleFunc("GET /api/vms", a.listVMs)

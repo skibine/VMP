@@ -59,6 +59,7 @@ type VM struct {
 	AgentPort         *int     `json:"agent_port"`
 	PrometheusURL     string   `json:"prometheus_url"`
 	RecordSSHSessions bool     `json:"record_ssh_sessions"`
+	MetricsEnabled    bool     `json:"metrics_enabled"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
 	ArchivedAt        *string  `json:"archived_at"`

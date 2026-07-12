@@ -1,7 +1,8 @@
 <script>
-  import { createEventDispatcher } from 'svelte'
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import Terminal from './Terminal.svelte'
+  import MetricsChart from './MetricsChart.svelte'
 
   // region VmDetail [DOMAIN(7): UI; CONCEPT(8]: Detail; TECH(6]: svelte]
   // Plain-language detail: health (up/down + reason), ping liveness + run-now, one-shot
@@ -22,7 +23,9 @@
   let editMode = false
   let edit = { name: '', hostname: '', ip: '', port_ssh: 22, tags: '', notes: '' }
   let editMsg = ''
-  let cred = { ssh_user: '', auth_type: 'password', has_secret: false, secret: '', msg: '', ok: false, busy: false }
+  let cred = { ssh_user: '', auth_type: 'password', has_secret: false, secret: '', key_passphrase: '', msg: '', ok: false, busy: false }
+  let validate = { kind: '', detail: '' }
+  let system = null // inventory from cred-save probe
 
   let diag = { check_type: 'tcp', param: '', busy: false, msg: '', res: null }
   let pingBusy = false
@@ -36,11 +39,25 @@
   let termKey = 0
   let termNote = { msg: '', kind: '' }
 
+  // Metrics history (pull-poller) + sparklines.
+  let metricsRange = '1h'
+  let series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+  let metricsBusy = false
+  let metricsErr = ''
+  let metricsTs = ''
+  let metricsTimer = null
+
   $: vmId != null && loadDetail(vmId)
 
-  async function loadDetail(id) {
-    loading = true
-    err = ''
+  // loadDetail(id, soft): soft=true keeps the view mounted (no loading flip) so opened <details>,
+  // terminal, etc. are not unmounted+remounted on a refresh (otherwise <details> collapses).
+  async function loadDetail(id, soft = false) {
+    if (!soft) {
+      loading = true
+      err = ''
+      system = null
+      validate = { kind: '', detail: '' }
+    }
     try {
       const [v, h, r, c, cr] = await Promise.all([
         api.getVm(id).catch(() => null),
@@ -57,10 +74,11 @@
       if (v) {
         edit = { name: v.name, hostname: v.hostname, ip: v.ip, port_ssh: v.port_ssh, tags: (v.tags || []).join(', '), notes: v.notes || '' }
       }
+      loadMetrics()
     } catch (e) {
       err = e.message
     } finally {
-      loading = false
+      if (!soft) loading = false
     }
   }
 
@@ -80,7 +98,7 @@
     pingMsg = ''
     try {
       await api.runCheckNow(pingCheck.id)
-      await loadDetail(vmId)
+      await loadDetail(vmId, true)
     } catch (e) {
       pingMsg = e.message
     } finally {
@@ -91,7 +109,7 @@
   async function addPing() {
     try {
       await api.createCheck({ vm_id: vmId, target_type: 'vm', check_type: 'ping', interval_sec: 60 })
-      await loadDetail(vmId)
+      await loadDetail(vmId, true)
     } catch (e) {
       pingMsg = e.message
     }
@@ -116,7 +134,7 @@
   async function runNow(c) {
     try {
       await api.runCheckNow(c.id)
-      await loadDetail(vmId)
+      await loadDetail(vmId, true)
     } catch (e) {
       checkMsg = e.message
     }
@@ -141,7 +159,7 @@
     try {
       await api.createCheck({ vm_id: vmId, target_type: 'vm', check_type: nc.check_type, interval_sec: Number(nc.interval_sec) || 60, params })
       nc.target = ''
-      await loadDetail(vmId)
+      await loadDetail(vmId, true)
     } catch (e) {
       checkMsg = e.message
     }
@@ -155,7 +173,7 @@
         tags: edit.tags.split(',').map((t) => t.trim()).filter(Boolean), notes: edit.notes
       })
       editMode = false
-      await loadDetail(vmId)
+      await loadDetail(vmId, true)
       dispatch('changed')
     } catch (e) {
       editMsg = e.message
@@ -169,13 +187,22 @@
   }
 
   async function saveCred() {
-    cred.busy = true; cred.msg = ''
+    cred.busy = true; cred.msg = ''; validate = { kind: '', detail: '' }
     try {
-      await api.setVMCreds(vmId, { ssh_user: cred.ssh_user, auth_type: cred.auth_type, secret: cred.secret })
-      cred.secret = ''
+      const res = await api.setVMCreds(vmId, { ssh_user: cred.ssh_user, auth_type: cred.auth_type, secret: cred.secret, key_passphrase: cred.key_passphrase })
+      cred.secret = ''; cred.key_passphrase = ''
       const fresh = await api.getVMCreds(vmId)
       cred.has_secret = !!fresh.has_secret; cred.ssh_user = fresh.ssh_user; cred.auth_type = fresh.auth_type
-      cred.msg = 'saved'; cred.ok = true
+      if (res && res.validated) {
+        cred.msg = 'saved ✓ connected'; cred.ok = true
+        if (res.inventory) system = res.inventory
+        await loadMetrics()
+      } else if (res && res.error_kind) {
+        validate = { kind: res.error_kind, detail: res.error_detail || '' }
+        cred.msg = 'saved but not verified'; cred.ok = false
+      } else {
+        cred.msg = 'saved'; cred.ok = true
+      }
     } catch (e) { cred.msg = e.message; cred.ok = false } finally { cred.busy = false }
   }
 
@@ -222,6 +249,51 @@
   $: memPct = snap.data && snap.data.mem_total_mb ? Math.min(100, (snap.data.mem_used_mb / snap.data.mem_total_mb) * 100) : 0
   $: diskPct = snap.data && snap.data.disk_total_gb ? Math.min(100, (snap.data.disk_used_gb / snap.data.disk_total_gb) * 100) : 0
 
+  async function loadMetrics() {
+    if (!vm || !vm.metrics_enabled) {
+      series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+      return
+    }
+    metricsBusy = true
+    metricsErr = ''
+    try {
+      const d = await api.metrics(vmId, metricsRange)
+      const s = d.series || {}
+      series = {
+        mem_used_mb: s.mem_used_mb || [],
+        swap_used_mb: s.swap_used_mb || [],
+        disk_used_gb: s.disk_used_gb || [],
+        load1: s.load1 || []
+      }
+      metricsTs = (d.latest && d.latest.ts) ? d.latest.ts : ''
+    } catch (e) {
+      metricsErr = e.message
+    } finally {
+      metricsBusy = false
+    }
+  }
+
+  async function toggleMetrics() {
+    metricsErr = ''
+    const next = !vm.metrics_enabled
+    try {
+      await api.setMetrics(vmId, next)
+      vm = { ...vm, metrics_enabled: next }
+      if (next) {
+        await loadMetrics()
+      } else {
+        series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+      }
+    } catch (e) {
+      metricsErr = e.message
+    }
+  }
+
+  // auto-refresh sparklines every 30s while metrics are enabled for this VM
+  $: if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null }
+  $: if (vm && vm.metrics_enabled) { metricsTimer = setInterval(loadMetrics, 30000) }
+  onDestroy(() => { if (metricsTimer) clearInterval(metricsTimer) })
+
   $: credPH = cred.auth_type === 'key' ? 'paste private key (PEM)' : cred.auth_type === 'agent' ? 'not needed (uses ssh-agent)' : cred.has_secret ? '•••• (new to replace)' : 'password'
   $: needsParam = diag.check_type === 'tcp' || diag.check_type === 'tls' || diag.check_type === 'http'
 </script>
@@ -248,51 +320,188 @@
       </div>
     </div>
 
-    <!-- Liveness: ping -->
-    <section class="hud-panel p-4 space-y-2">
-      <div class="hud-label text-neon-cyan">liveness&nbsp;//&nbsp;ping</div>
-      {#if pingCheck}
-        <div class="flex items-center gap-3">
-          {#if pingResult}
-            <span class="hud-label {pingResult.latest_status === 'ok' ? 'text-neon-green' : pingResult.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'} uppercase">{pingResult.latest_status === 'ok' ? 'up' : pingResult.latest_status === 'critical' ? 'down' : 'unknown'}</span>
-            {#if pingResult.latest_status === 'ok'}<span class="text-xs text-hud-dim font-mono">{Number(pingResult.latest_latency_ms).toFixed(1)}ms</span>{/if}
-            <span class="text-[11px] text-hud-dim font-mono ml-auto truncate max-w-[60%]">{pingResult.latest_message}</span>
-          {:else}
-            <span class="hud-label text-hud-dim">pending…</span>
+    <!-- Edit (fields + creds) — at the top so it's visible above terminal -->
+    {#if editMode}
+      <section class="hud-panel p-4 space-y-4">
+        <div>
+          <div class="hud-label text-neon-cyan mb-2">vm fields</div>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block space-y-1"><span class="hud-label">name</span><input class="hud-input" bind:value={edit.name} /></label>
+            <label class="block space-y-1"><span class="hud-label">hostname</span><input class="hud-input" bind:value={edit.hostname} /></label>
+            <label class="block space-y-1"><span class="hud-label">ip</span><input class="hud-input" bind:value={edit.ip} /></label>
+            <label class="block space-y-1"><span class="hud-label">ssh port</span><input class="hud-input font-mono" type="number" bind:value={edit.port_ssh} /></label>
+            <label class="block space-y-1 col-span-2"><span class="hud-label">tags (comma-separated)</span><input class="hud-input" bind:value={edit.tags} /></label>
+            <label class="block space-y-1 col-span-2"><span class="hud-label">notes</span><textarea class="hud-input resize-none" rows="2" bind:value={edit.notes}></textarea></label>
+          </div>
+          <div class="flex items-center gap-2 mt-3"><button class="hud-btn hud-btn-primary" on:click={saveEdit}>save vm</button><button class="hud-btn" on:click={archiveVm}>archive</button>{#if editMsg}<span class="text-xs font-mono text-neon-red">{editMsg}</span>{/if}</div>
+        </div>
+        <div class="border-t border-hud-line pt-3">
+          <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">ssh credentials</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">set</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">none</span>{/if}</div>
+          <div class="grid grid-cols-3 gap-2">
+            <input class="hud-input" placeholder="ssh user" bind:value={cred.ssh_user} />
+            <select class="hud-input" bind:value={cred.auth_type}><option value="password">password</option><option value="key">key</option><option value="agent">agent</option></select>
+            {#if cred.auth_type === 'key'}
+              <textarea class="hud-input font-mono resize-none" rows="2" placeholder={credPH} bind:value={cred.secret}></textarea>
+            {:else}
+              <input class="hud-input" type="password" placeholder={credPH} bind:value={cred.secret} />
+            {/if}
+          </div>
+          {#if cred.auth_type === 'key'}
+            <input class="hud-input mt-2" type="password" placeholder="key passphrase (leave empty if none)" bind:value={cred.key_passphrase} />
           {/if}
-          <button class="hud-btn hud-btn-primary !py-1" on:click={pingNow} disabled={pingBusy}>{pingBusy ? '…' : '▶ ping now'}</button>
+          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy}>{cred.busy ? 'saving…' : 'save & probe'}</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>clear</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-amber'}">{cred.msg}</span>{/if}</div>
+          {#if validate.kind}
+            <div class="text-xs font-mono text-neon-red mt-2">
+              connection check: <span class="uppercase">{validate.kind}</span> {#if validate.kind === 'no_credentials'}— enter a secret above{:else if validate.kind === 'auth_failed'}— wrong user/password/key{:else if validate.kind === 'host_key_changed'}— <button class="hud-btn !px-2 !py-0.5" on:click={resetHostKey}>reset host key</button>{/if}
+              {#if validate.detail}<div class="text-hud-dim mt-1 break-all">{validate.detail}</div>{/if}
+            </div>
+          {/if}
         </div>
-        {#if pingMsg}<div class="text-xs font-mono text-neon-red">{pingMsg}</div>{/if}
+      </section>
+    {/if}
+
+    <!-- Row: liveness | diagnostics (compact, two columns) -->
+    <div class="grid grid-cols-2 gap-3">
+      <section class="hud-panel p-3 space-y-2">
+        <div class="hud-label text-neon-cyan">liveness&nbsp;//&nbsp;ping</div>
+        {#if pingCheck}
+          <div class="flex items-center gap-2 flex-wrap">
+            {#if pingResult}
+              <span class="hud-label {pingResult.latest_status === 'ok' ? 'text-neon-green' : pingResult.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'} uppercase">{pingResult.latest_status === 'ok' ? 'up' : pingResult.latest_status === 'critical' ? 'down' : 'unknown'}</span>
+              {#if pingResult.latest_status === 'ok'}<span class="text-xs text-hud-dim font-mono">{Number(pingResult.latest_latency_ms).toFixed(1)}ms</span>{/if}
+              <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={pingNow} disabled={pingBusy}>{pingBusy ? '…' : '▶'}</button>
+            {:else}
+              <span class="hud-label text-hud-dim">pending…</span>
+              <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={pingNow} disabled={pingBusy}>{pingBusy ? '…' : '▶ ping now'}</button>
+            {/if}
+          </div>
+          {#if pingMsg}<div class="text-xs font-mono text-neon-red">{pingMsg}</div>{/if}
+        {:else}
+          <div class="flex items-center gap-2">
+            <span class="hud-label text-hud-dim">no liveness probe</span>
+            <button class="hud-btn hud-btn-primary ml-auto" on:click={addPing}>+ add ping</button>
+          </div>
+        {/if}
+      </section>
+
+      <section class="hud-panel p-3 space-y-2">
+        <div class="hud-label text-neon-cyan">diagnostics&nbsp;//&nbsp;one-shot</div>
+        <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
+          <select class="hud-input" bind:value={diag.check_type}>
+            {#each DIAG_TYPES as t}<option value={t}>{t}</option>{/each}
+          </select>
+          <input class="hud-input" placeholder={needsParam ? (diag.check_type === 'http' ? 'http://host/path' : 'port') : '—'} bind:value={diag.param} disabled={!needsParam} />
+          <button class="hud-btn hud-btn-primary" on:click={runDiag} disabled={diag.busy}>{diag.busy ? '…' : 'run'}</button>
+        </div>
+        {#if diag.msg}<div class="text-xs font-mono text-neon-red">{diag.msg}</div>{/if}
+        {#if diag.res}
+          <div class="border border-hud-line rounded px-2 py-1 text-xs font-mono flex items-center gap-2">
+            <span class="hud-label {diag.res.status === 'ok' ? 'text-neon-green' : diag.res.status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{diag.res.status}</span>
+            <span class="text-hud-dim">{Number(diag.res.latency_ms || 0).toFixed(1)}ms</span>
+            <span class="text-emerald-200/70 truncate">{diag.res.message}</span>
+          </div>
+        {/if}
+      </section>
+    </div>
+
+    <!-- System profile (inventory from cred-save probe) -->
+    {#if system}
+      <section class="hud-panel p-3 space-y-2">
+        <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
+          <div class="truncate"><span class="hud-label text-hud-dim">os</span> {system.os || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">kernel</span> {system.kernel || '—'} {system.arch}</div>
+          <div class="truncate col-span-2"><span class="hud-label text-hud-dim">cpu</span> {system.cpu_model || '—'}</div>
+          <div><span class="hud-label text-hud-dim">ram</span> {system.mem_total_mb} MB</div>
+          <div><span class="hud-label text-hud-dim">swap</span> {system.swap_total_mb} MB</div>
+          <div class="col-span-2"><span class="hud-label text-hud-dim">up</span> {system.uptime || '—'}</div>
+        </div>
+        {#if system.ports?.length}
+          <div class="text-xs font-mono"><span class="hud-label text-hud-dim">listening ports:</span> <span class="text-emerald-200">{system.ports.join(', ')}</span></div>
+        {/if}
+        {#if system.docker?.length}
+          <div class="text-xs font-mono space-y-0.5"><span class="hud-label text-hud-dim">docker:</span>{#each system.docker as d}<div class="text-emerald-200/80 pl-2 truncate">▸ {d.replace(/\|/g, ' · ')}</div>{/each}</div>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
+        <span class="hud-label text-hud-dim ml-auto">polls via ssh every 60s</span>
+        <button class="hud-btn !py-0.5" on:click={toggleMetrics}>{vm.metrics_enabled ? '● on' : '○ off'}</button>
+      </div>
+      {#if vm.metrics_enabled}
+        <div class="flex items-center gap-2 flex-wrap">
+          {#each ['1h', '24h', '7d'] as r}
+            <button class="hud-btn !py-0.5 {metricsRange === r ? 'hud-btn-primary' : ''}" on:click={() => { metricsRange = r; loadMetrics() }}>{r}</button>
+          {/each}
+          <button class="hud-btn !py-0.5" on:click={loadMetrics} disabled={metricsBusy}>{metricsBusy ? '…' : '↻'}</button>
+          {#if metricsTs}<span class="text-[10px] font-mono text-hud-dim ml-auto">last: {metricsTs.slice(11, 19)}</span>{/if}
+        </div>
+        {#if metricsErr}<div class="text-xs font-mono text-neon-red">{metricsErr}</div>{/if}
+        <div class="grid grid-cols-2 gap-2">
+          <MetricsChart label="mem used" unit="MB" data={series.mem_used_mb} color="#22d3ee" />
+          <MetricsChart label="swap used" unit="MB" data={series.swap_used_mb} color="#a78bfa" />
+          <MetricsChart label="disk used" unit="GB" data={series.disk_used_gb} decimals={1} color="#22c55e" />
+          <MetricsChart label="load 1m" data={series.load1} decimals={2} color="#eab308" />
+        </div>
       {:else}
-        <div class="flex items-center gap-3">
-          <span class="hud-label text-hud-dim">no liveness probe</span>
-          <button class="hud-btn hud-btn-primary ml-auto" on:click={addPing}>+ add ping</button>
-        </div>
+        <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds.</p>
       {/if}
     </section>
 
-    <!-- Diagnostics (one-shot, manual; not ping) -->
-    <section class="hud-panel p-4 space-y-2">
-      <div class="hud-label text-neon-cyan">diagnostics&nbsp;//&nbsp;one-shot</div>
-      <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
-        <select class="hud-input" bind:value={diag.check_type}>
-          {#each DIAG_TYPES as t}<option value={t}>{t}</option>{/each}
-        </select>
-        <input class="hud-input" placeholder={needsParam ? (diag.check_type === 'http' ? 'http://host/path' : 'port (e.g. 22)') : '—'} bind:value={diag.param} disabled={!needsParam} />
-        <button class="hud-btn hud-btn-primary" on:click={runDiag} disabled={diag.busy}>{diag.busy ? '…' : 'run'}</button>
+    <!-- Live metrics (SSH snapshot, no agent) + interactive terminal -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;over ssh</span>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : '▶ snapshot'}</button>
+        <button class="hud-btn !py-0.5" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? '✕ close' : '> terminal'}</button>
       </div>
-      {#if diag.msg}<div class="text-xs font-mono text-neon-red">{diag.msg}</div>{/if}
-      {#if diag.res}
-        <div class="border border-hud-line rounded px-2 py-1 text-xs font-mono flex items-center gap-2">
-          <span class="hud-label {diag.res.status === 'ok' ? 'text-neon-green' : diag.res.status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{diag.res.status}</span>
-          <span class="text-hud-dim">{Number(diag.res.latency_ms || 0).toFixed(1)}ms</span>
-          <span class="text-emerald-200/70 truncate">{diag.res.message}</span>
+      {#if snap.err}
+        <div class="text-xs font-mono text-neon-red">
+          {snap.err}
+          {#if snap.kind === 'no_ssh_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
+          {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
+        </div>
+      {/if}
+      {#if snap.data}
+        <div class="space-y-1.5">
+          <div>
+            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>memory</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
+            <div class="h-1.5 bg-hud-line rounded"><div class="h-full bg-neon-cyan rounded" style="width:{memPct}%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>disk /</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
+            <div class="h-1.5 bg-hud-line rounded"><div class="h-full {diskPct > 85 ? 'bg-neon-red' : 'bg-neon-green'} rounded" style="width:{diskPct}%"></div></div>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+            <div><span class="hud-label text-hud-dim">load</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
+            <div><span class="hud-label text-hud-dim">cpus</span> <span>{snap.data.cpu_count}</span></div>
+            <div class="truncate"><span class="hud-label text-hud-dim">up</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
+          </div>
+        </div>
+      {:else if !snap.err}
+        <p class="text-xs text-hud-dim">// run a snapshot to fetch CPU / RAM / disk / load over SSH now.</p>
+      {/if}
+      {#if showTerm}
+        <div class="space-y-2">
+          {#key termKey}
+            <Terminal vmId={vmId} on:error={onTermError} />
+          {/key}
+          {#if termNote.msg}
+            <div class="text-xs font-mono text-neon-red">
+              {termNote.msg}
+              {#if termNote.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
+            </div>
+          {/if}
         </div>
       {/if}
     </section>
 
     <!-- Monitoring (collapsible) -->
-    <details class="hud-panel p-4">
+    <details class="hud-panel p-3">
       <summary class="hud-label text-neon-cyan cursor-pointer">monitoring&nbsp;//&nbsp;{checks.length} scheduled</summary>
       <div class="space-y-2 mt-2">
         {#if !checks.length}<div class="hud-label">none</div>{:else}
@@ -317,83 +526,5 @@
         {#if checkMsg}<div class="text-xs font-mono text-neon-red">{checkMsg}</div>{/if}
       </div>
     </details>
-
-    <!-- Live metrics (SSH snapshot, no agent) + interactive terminal -->
-    <section class="hud-panel p-4 space-y-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;over ssh</span>
-        <button class="hud-btn hud-btn-primary !py-1 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : '▶ snapshot'}</button>
-        <button class="hud-btn !py-1" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? '✕ close' : '> terminal'}</button>
-      </div>
-
-      {#if snap.err}
-        <div class="text-xs font-mono text-neon-red">
-          {snap.err}
-          {#if snap.kind === 'no_ssh_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
-          {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
-        </div>
-      {/if}
-
-      {#if snap.data}
-        <div class="space-y-2">
-          <div>
-            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>memory</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
-            <div class="h-1.5 bg-hud-line rounded"><div class="h-full bg-neon-cyan rounded" style="width:{memPct}%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>disk /</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
-            <div class="h-1.5 bg-hud-line rounded"><div class="h-full {diskPct > 85 ? 'bg-neon-red' : 'bg-neon-green'} rounded" style="width:{diskPct}%"></div></div>
-          </div>
-          <div class="grid grid-cols-3 gap-2 text-xs font-mono pt-1">
-            <div><span class="hud-label text-hud-dim">load</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
-            <div><span class="hud-label text-hud-dim">cpus</span> <span>{snap.data.cpu_count}</span></div>
-            <div class="truncate"><span class="hud-label text-hud-dim">up</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
-          </div>
-        </div>
-      {:else if !snap.err}
-        <p class="text-xs text-hud-dim">// run a snapshot to fetch CPU / RAM / disk / load over SSH (no agent install needed).</p>
-      {/if}
-
-      {#if showTerm}
-        <div class="space-y-2">
-          {#key termKey}
-            <Terminal vmId={vmId} on:error={onTermError} />
-          {/key}
-          {#if termNote.msg}
-            <div class="text-xs font-mono text-neon-red">
-              {termNote.msg}
-              {#if termNote.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    </section>
-
-    <!-- Edit (fields + creds) -->
-    {#if editMode}
-      <section class="hud-panel p-4 space-y-4">
-        <div>
-          <div class="hud-label text-neon-cyan mb-2">vm fields</div>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="block space-y-1"><span class="hud-label">name</span><input class="hud-input" bind:value={edit.name} /></label>
-            <label class="block space-y-1"><span class="hud-label">hostname</span><input class="hud-input" bind:value={edit.hostname} /></label>
-            <label class="block space-y-1"><span class="hud-label">ip</span><input class="hud-input" bind:value={edit.ip} /></label>
-            <label class="block space-y-1"><span class="hud-label">ssh port</span><input class="hud-input font-mono" type="number" bind:value={edit.port_ssh} /></label>
-            <label class="block space-y-1 col-span-2"><span class="hud-label">tags (comma-separated)</span><input class="hud-input" bind:value={edit.tags} /></label>
-            <label class="block space-y-1 col-span-2"><span class="hud-label">notes</span><textarea class="hud-input resize-none" rows="2" bind:value={edit.notes}></textarea></label>
-          </div>
-          <div class="flex items-center gap-2 mt-3"><button class="hud-btn hud-btn-primary" on:click={saveEdit}>save vm</button><button class="hud-btn" on:click={archiveVm}>archive</button>{#if editMsg}<span class="text-xs font-mono text-neon-red">{editMsg}</span>{/if}</div>
-        </div>
-        <div class="border-t border-hud-line pt-3">
-          <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">ssh credentials</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">set</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">none</span>{/if}</div>
-          <div class="grid grid-cols-3 gap-2">
-            <input class="hud-input" placeholder="ssh user" bind:value={cred.ssh_user} />
-            <select class="hud-input" bind:value={cred.auth_type}><option value="password">password</option><option value="key">key</option><option value="agent">agent</option></select>
-            <input class="hud-input" type="password" placeholder={credPH} bind:value={cred.secret} />
-          </div>
-          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy}>save creds</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>clear</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-red'}">{cred.msg}</span>{/if}</div>
-        </div>
-      </section>
-    {/if}
   {/if}
 </div>

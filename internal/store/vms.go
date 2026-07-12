@@ -33,12 +33,12 @@ func (s *Store) CreateVM(ctx context.Context, v VM) (int64, error) {
 INSERT INTO vms
 (name, hostname, ip, port_ssh, ssh_user, auth_type, provider, location_country, location_city,
  tags, group_id, notes, cost_monthly, currency, owner_user_id, agent_enabled, agent_port,
- prometheus_url, record_ssh_sessions)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+ prometheus_url, record_ssh_sessions, metrics_enabled)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions))
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled))
 	if err != nil {
 		logging.LDD(s.logger, 10, "CreateVM", "INSERT_FAIL", err.Error())
 		return 0, fmt.Errorf("CreateVM: %w", err)
@@ -100,13 +100,13 @@ func (s *Store) UpdateVM(ctx context.Context, v VM) error {
 	res, err := s.DB.ExecContext(ctx, `
 UPDATE vms SET name=?, hostname=?, ip=?, port_ssh=?, ssh_user=?, auth_type=?, provider=?,
  location_country=?, location_city=?, tags=?, group_id=?, notes=?, cost_monthly=?, currency=?,
- owner_user_id=?, agent_enabled=?, agent_port=?, prometheus_url=?, record_ssh_sessions=?,
+ owner_user_id=?, agent_enabled=?, agent_port=?, prometheus_url=?, record_ssh_sessions=?, metrics_enabled=?,
  updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), v.ID)
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), v.ID)
 	if err != nil {
 		return fmt.Errorf("UpdateVM: %w", err)
 	}
@@ -142,7 +142,7 @@ func (s *Store) DeleteVM(ctx context.Context, id int64) error {
 func vmSelectCols() string {
 	return `SELECT id, name, hostname, ip, port_ssh, ssh_user, auth_type, provider,
  location_country, location_city, tags, group_id, notes, cost_monthly, currency,
- owner_user_id, agent_enabled, agent_port, prometheus_url, record_ssh_sessions,
+ owner_user_id, agent_enabled, agent_port, prometheus_url, record_ssh_sessions, metrics_enabled,
  created_at, updated_at, archived_at FROM vms`
 }
 
@@ -153,11 +153,11 @@ func scanVM(sc scanner) (VM, error) {
 	var groupID, ownerID, agentPort sql.NullInt64
 	var cost sql.NullFloat64
 	var archived sql.NullString
-	var agentEnabled, recordSSH int
+	var agentEnabled, recordSSH, metricsEnabled int
 	err := sc.Scan(
 		&v.ID, &v.Name, &v.Hostname, &v.IP, &v.PortSSH, &v.SSHUser, &v.AuthType, &v.Provider,
 		&v.LocationCountry, &v.LocationCity, &tags, &groupID, &v.Notes, &cost, &v.Currency,
-		&ownerID, &agentEnabled, &agentPort, &v.PrometheusURL, &recordSSH,
+		&ownerID, &agentEnabled, &agentPort, &v.PrometheusURL, &recordSSH, &metricsEnabled,
 		&v.CreatedAt, &v.UpdatedAt, &archived)
 	if err != nil {
 		return v, err
@@ -173,5 +173,6 @@ func scanVM(sc scanner) (VM, error) {
 	v.ArchivedAt = toStrPtr(archived)
 	v.AgentEnabled = toBool(agentEnabled)
 	v.RecordSSHSessions = toBool(recordSSH)
+	v.MetricsEnabled = toBool(metricsEnabled)
 	return v, nil
 }

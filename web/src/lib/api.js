@@ -54,7 +54,11 @@ export const api = {
 
   // Plane B: web-ssh snapshot + TOFU host-key reset.
   snapshot: (id) => req('/api/vms/' + id + '/snapshot', { method: 'POST' }),
-  resetHostKey: (id) => req('/api/vms/' + id + '/hostkey', { method: 'DELETE' })
+  resetHostKey: (id) => req('/api/vms/' + id + '/hostkey', { method: 'DELETE' }),
+
+  // Plane A: metrics time-series + pull-poller toggle.
+  metrics: (id, range) => req('/api/vms/' + id + '/metrics' + (range ? '?range=' + range : '')),
+  setMetrics: (id, enabled) => req('/api/vms/' + id + '/metrics', { method: 'PUT', body: { enabled } })
 }
 
 // terminalUrl builds the WebSocket URL for an interactive web-ssh session. The session token is

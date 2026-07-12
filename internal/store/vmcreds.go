@@ -23,10 +23,11 @@ import (
 
 // VMCredentials is the decrypted form (RAM only).
 type VMCredentials struct {
-	VMID     int64
-	SSHUser  string
-	AuthType string // password | key | agent
-	Secret   string // password OR private key (plaintext only in RAM)
+	VMID          int64
+	SSHUser       string
+	AuthType      string // password | key | agent
+	Secret        string // password OR private key (plaintext only in RAM)
+	KeyPassphrase string // passphrase for passphrase-protected keys (empty = no passphrase)
 }
 
 // Validate enforces non-empty user for password/key auth (agent needs no secret).
@@ -51,10 +52,10 @@ func (s *Store) SetVMCredentials(ctx context.Context, c VMCredentials) error {
 		return err
 	}
 	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO vm_credentials (vm_id, ssh_user, auth_type, secret) VALUES (?,?,?,?)
+INSERT INTO vm_credentials (vm_id, ssh_user, auth_type, secret, key_passphrase) VALUES (?,?,?,?,?)
 ON CONFLICT(vm_id) DO UPDATE SET ssh_user=excluded.ssh_user, auth_type=excluded.auth_type,
- secret=excluded.secret, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-		c.VMID, c.SSHUser, c.AuthType, s.encCol(c.Secret))
+ secret=excluded.secret, key_passphrase=excluded.key_passphrase, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+		c.VMID, c.SSHUser, c.AuthType, s.encCol(c.Secret), s.encCol(c.KeyPassphrase))
 	if err != nil {
 		return fmt.Errorf("SetVMCredentials: %w", err)
 	}
@@ -64,10 +65,10 @@ ON CONFLICT(vm_id) DO UPDATE SET ssh_user=excluded.ssh_user, auth_type=excluded.
 // GetVMCredentials returns the decrypted credentials for a VM. ok=false when none stored.
 func (s *Store) GetVMCredentials(ctx context.Context, vmID int64) (VMCredentials, bool, error) {
 	var c VMCredentials
-	var rawSecret string
+	var rawSecret, rawPass string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT vm_id, ssh_user, auth_type, secret FROM vm_credentials WHERE vm_id=?`, vmID).
-		Scan(&c.VMID, &c.SSHUser, &c.AuthType, &rawSecret)
+		`SELECT vm_id, ssh_user, auth_type, secret, key_passphrase FROM vm_credentials WHERE vm_id=?`, vmID).
+		Scan(&c.VMID, &c.SSHUser, &c.AuthType, &rawSecret, &rawPass)
 	if err == sql.ErrNoRows {
 		return VMCredentials{}, false, nil
 	}
@@ -75,6 +76,7 @@ func (s *Store) GetVMCredentials(ctx context.Context, vmID int64) (VMCredentials
 		return VMCredentials{}, false, fmt.Errorf("GetVMCredentials: %w", err)
 	}
 	c.Secret = s.decCol(rawSecret)
+	c.KeyPassphrase = s.decCol(rawPass)
 	return c, true, nil
 }
 

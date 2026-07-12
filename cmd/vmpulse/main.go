@@ -30,7 +30,9 @@ import (
 	"github.com/skibine/vm-pulse/internal/config"
 	"github.com/skibine/vm-pulse/internal/crypto"
 	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vm-pulse/internal/metrics"
 	"github.com/skibine/vm-pulse/internal/monitor"
+	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
@@ -101,6 +103,10 @@ func main() {
 	seedAI(ctx, s, cfg, logger)
 	aiRegistry := ai.NewRegistry(ai.StoreTools(s)...)
 	server.WithAgent(&ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger})
+
+	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
+	// records CPU/RAM/disk/load samples; hourly downsampling (§5.2). Runs until ctx is cancelled.
+	go metrics.New(s, ssh.New(s, logger), logger).Run(ctx)
 
 	if err := server.Serve(ctx); err != nil {
 		logging.LDD(logger, 10, "main", "SERVE_FAIL", err.Error())

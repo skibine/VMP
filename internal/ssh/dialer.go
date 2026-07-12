@@ -25,6 +25,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -107,6 +108,11 @@ func (d *Dialer) Dial(ctx context.Context, vmID int64) (*gossh.Client, *store.VM
 	return client, &vm, nil
 }
 
+// isPassphraseErr reports whether the key-parse error indicates a passphrase-protected key.
+func isPassphraseErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "passphrase")
+}
+
 // dialAddr picks the dial target: prefer the VM IP, fall back to the hostname; always VM SSH port.
 func dialAddr(vm store.VM) string {
 	host := vm.IP
@@ -136,6 +142,10 @@ func clientConfig(creds store.VMCredentials) (*gossh.ClientConfig, error) {
 		cfg.Auth = []gossh.AuthMethod{gossh.Password(creds.Secret)}
 	case "key":
 		signer, err := gossh.ParsePrivateKey([]byte(creds.Secret))
+		// Gracefully handle passphrase-protected keys: retry with the stored passphrase.
+		if err != nil && isPassphraseErr(err) && creds.KeyPassphrase != "" {
+			signer, err = gossh.ParsePrivateKeyWithPassphrase([]byte(creds.Secret), []byte(creds.KeyPassphrase))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("parse private key: %w", err)
 		}

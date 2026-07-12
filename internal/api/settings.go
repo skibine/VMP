@@ -15,8 +15,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
@@ -94,20 +98,74 @@ func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		SSHUser  string `json:"ssh_user"`
-		AuthType string `json:"auth_type"`
-		Secret   string `json:"secret"`
+		SSHUser       string `json:"ssh_user"`
+		AuthType      string `json:"auth_type"`
+		Secret        string `json:"secret"`
+		KeyPassphrase string `json:"key_passphrase"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
+
+	// Preserve the existing secret/passphrase when the request omits them (so the user can change
+	// only the ssh_user/auth_type without re-pasting the key every time).
+	cur, has, _ := a.st.GetVMCredentials(r.Context(), id)
+	secret := body.Secret
+	if secret == "" && has {
+		secret = cur.Secret
+	}
+	pass := body.KeyPassphrase
+	if pass == "" && has && body.Secret == "" {
+		pass = cur.KeyPassphrase
+	}
 	if err := a.st.SetVMCredentials(r.Context(), store.VMCredentials{
-		VMID: id, SSHUser: body.SSHUser, AuthType: body.AuthType, Secret: body.Secret,
+		VMID: id, SSHUser: body.SSHUser, AuthType: body.AuthType, Secret: secret, KeyPassphrase: pass,
 	}); err != nil {
 		a.writeErr(w, "setVMCreds", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
+	// Validate immediately: dial with the just-stored creds and, on success, collect a VPS profile.
+	resp := map[string]any{"ok": true, "validated": false}
+	if secret == "" && body.AuthType != "agent" {
+		resp["error_kind"] = "no_credentials"
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	client, _, derr := a.dialer.Dial(r.Context(), id)
+	if derr != nil {
+		resp["error_kind"] = classifyDialKind(derr)
+		resp["error_detail"] = derr.Error()
+		logging.LDD(a.logger, 9, "setVMCreds", "VALIDATE_FAIL", derr.Error())
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	defer client.Close()
+	resp["validated"] = true
+	if inv, err := a.dialer.Inventory(r.Context(), client); err == nil {
+		resp["inventory"] = inv
+	}
+	logging.LDD(a.logger, 8, "setVMCreds", "VALIDATED", "")
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// classifyDialKind maps a dialer error to a machine-readable kind for the UI.
+func classifyDialKind(err error) string {
+	switch {
+	case errors.Is(err, ssh.ErrNoCredentials):
+		return "no_credentials"
+	case errors.Is(err, ssh.ErrHostKeyChanged):
+		return "host_key_changed"
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "unable to authenticate") || strings.Contains(msg, "handshake") {
+		return "auth_failed"
+	}
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no route to host") || strings.Contains(msg, "timeout") {
+		return "unreachable"
+	}
+	return "ssh_dial_failed"
 }
 
 func (a *crudAPI) deleteVMCreds(w http.ResponseWriter, r *http.Request) {
