@@ -28,6 +28,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
 	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
+	mux.HandleFunc("GET /api/vms/{id}/siteinfo", a.siteInfoVM)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -151,6 +152,30 @@ func (a *crudAPI) vhostsVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, vl)
+}
+
+// siteInfoVM fetches HTTP response headers + security posture + CMS fingerprint for the VM's site
+// (or an explicit ?url=). Plane A: a plain HTTP GET from the VM Pulse host, no SSH credentials.
+func (a *crudAPI) siteInfoVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	url := r.URL.Query().Get("url")
+	if url == "" {
+		vm, err := a.st.GetVM(r.Context(), id)
+		if err != nil {
+			a.writeErr(w, "siteInfoVM", err)
+			return
+		}
+		host := vm.IP
+		if host == "" {
+			host = vm.Hostname
+		}
+		url = "http://" + host + "/"
+	}
+	info, _ := monitor.ProbeSite(r.Context(), url)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.

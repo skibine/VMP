@@ -45,6 +45,7 @@ export const api = {
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   vmVHosts: (id) => req('/api/vms/' + id + '/vhosts'),
+  siteInfo: (id, url) => req('/api/vms/' + id + '/siteinfo' + (url ? '?url=' + encodeURIComponent(url) : '')),
   setAIAccess: (id, enabled) => req('/api/vms/' + id + '/ai-access', { method: 'PUT', body: { enabled } }),
   vmHealth: (id) => req('/api/vms/' + id + '/health'),
   vmResults: (id) => req('/api/vms/' + id + '/results'),

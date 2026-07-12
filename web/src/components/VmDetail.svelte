@@ -43,6 +43,9 @@
   // Web-server virtual hosts (nginx/apache config) — Plane B one-shot over SSH.
   let vhosts = { data: null, busy: false, err: '', kind: '' }
 
+  // Site info (HTTP headers + security + CMS) — Plane A, keyless, for the VM's site (or any URL).
+  let siteinfo = { data: null, busy: false, err: '', url: '' }
+
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
   let showTerm = false
@@ -113,6 +116,16 @@
     }
   }
 
+  async function loadSiteInfo() {
+    siteinfo = { data: null, busy: true, err: '', url: siteinfo.url }
+    try {
+      const d = await api.siteInfo(vmId, siteinfo.url)
+      siteinfo = { data: d, busy: false, err: d.fetch_error || '', url: siteinfo.url }
+    } catch (e) {
+      siteinfo = { data: null, busy: false, err: e.message, url: siteinfo.url }
+    }
+  }
+
   // loadDetail(id, soft): soft=true keeps the view mounted (no loading flip) so opened <details>,
   // terminal, etc. are not unmounted+remounted on a refresh (otherwise <details> collapses).
   async function loadDetail(id, soft = false) {
@@ -141,6 +154,7 @@
       }
       loadMetrics()
       if (v && v.ip) loadIPInfo(id)
+      if (v) siteinfo = { data: null, busy: false, err: '', url: 'http://' + (v.ip || v.hostname) + '/' }
     } catch (e) {
       err = e.message
     } finally {
@@ -580,6 +594,33 @@
         {:else}
           <div class="hud-label text-hud-dim">no web server / no vhosts</div>
         {/if}
+      {/if}
+    </section>
+
+    <!-- Site info (HTTP headers + security + CMS, Plane A keyless) -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="hud-label text-neon-cyan">site&nbsp;//&nbsp;info</span>
+        <input class="hud-input text-xs flex-1 min-w-0" bind:value={siteinfo.url} placeholder="http://host/" />
+        <button class="hud-btn hud-btn-primary !py-0.5" on:click={loadSiteInfo} disabled={siteinfo.busy}>{siteinfo.busy ? '…' : '▶ scan'}</button>
+      </div>
+      {#if siteinfo.err}
+        <div class="text-xs font-mono text-neon-red">{siteinfo.err}</div>
+      {:else if siteinfo.data}
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
+          <div class="truncate"><span class="hud-label text-hud-dim">status</span> {siteinfo.data.status || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">server</span> {siteinfo.data.server || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">powered</span> {siteinfo.data.powered_by || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">cms</span> <span class="text-neon-cyan">{siteinfo.data.cms || '—'}{#if siteinfo.data.cms_version}<span class="text-hud-dim"> {siteinfo.data.cms_version}</span>{/if}</span></div>
+        </div>
+        <div class="text-xs font-mono">
+          <span class="hud-label text-hud-dim">security:</span>
+          {#each Object.entries(siteinfo.data.security_headers || {}) as [k, v]}
+            <span class="ml-1 {v ? 'text-neon-green' : 'text-neon-red'}">{v ? '✓' : '✗'}{k.replace('X-Frame-Options','XFO').replace('Strict-Transport-Security','HSTS').replace('Content-Security-Policy','CSP').replace('X-Content-Type-Options','XCTO').replace('Referrer-Policy','RP')}</span>
+          {/each}
+          <span class="ml-2 hud-label {siteinfo.data.security_score >= 60 ? 'text-neon-green' : siteinfo.data.security_score >= 30 ? 'text-neon-amber' : 'text-neon-red'}">{siteinfo.data.security_score}/100</span>
+        </div>
+        {#if siteinfo.data.redirected}<div class="text-[11px] font-mono text-hud-dim">→ {siteinfo.data.final_url}</div>{/if}
       {/if}
     </section>
 
