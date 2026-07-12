@@ -42,3 +42,4 @@ coverage.out
 # Playwright MCP session artifacts (transient screenshots/snapshots)
 /.playwright-mcp/
 debug-*.png
+*.png
