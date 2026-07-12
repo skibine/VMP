@@ -10,8 +10,8 @@
   export let vmId = null
 
   const dispatch = createEventDispatcher()
-  const DIAG_TYPES = ['tcp', 'http', 'tls', 'dns'] // ping is liveness; whois moved to Domains
-  const MON_TYPES = ['ping', 'tcp', 'http', 'tls', 'dns']
+  const DIAG_TYPES = ['tcp', 'http', 'tls', 'dns', 'dnsbl'] // ping is liveness; whois moved to Domains
+  const MON_TYPES = ['ping', 'tcp', 'http', 'tls', 'dns', 'dnsbl']
 
   let vm = null
   let health = null
@@ -33,6 +33,9 @@
 
   // Quick-status battery: fixed credential-less probes (ssh/dns/web/tls) auto-run on select.
   let battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: '' }
+
+  // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
+  let ipinfo = { data: null, busy: false, err: '' }
 
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
@@ -58,6 +61,16 @@
       battery = { probes: b.probes || [], reachable: !!b.reachable, latency_ms: b.latency_ms || 0, busy: false, err: '' }
     } catch (e) {
       battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: e.message }
+    }
+  }
+
+  async function loadIPInfo(id) {
+    ipinfo = { data: null, busy: true, err: '' }
+    try {
+      const d = await api.ipInfo(id)
+      ipinfo = { data: d, busy: false, err: '' }
+    } catch (e) {
+      ipinfo = { data: null, busy: false, err: e.message }
     }
   }
 
@@ -87,6 +100,7 @@
         edit = { name: v.name, hostname: v.hostname, ip: v.ip, port_ssh: v.port_ssh, tags: (v.tags || []).join(', '), notes: v.notes || '' }
       }
       loadMetrics()
+      if (v && v.ip) loadIPInfo(id)
     } catch (e) {
       err = e.message
     } finally {
@@ -408,6 +422,31 @@
         {/if}
       </section>
     </div>
+
+    <!-- IP info (GeoIP + ASN + PTR) — Plane A, keyless -->
+    {#if vm.ip}
+      <section class="hud-panel p-3 space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="hud-label text-neon-cyan">ip&nbsp;//&nbsp;info</span>
+          <span class="text-xs text-hud-dim font-mono truncate ml-1">{vm.ip}</span>
+          <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadIPInfo(vmId)} disabled={ipinfo.busy}>{ipinfo.busy ? '…' : '↻'}</button>
+        </div>
+        {#if ipinfo.busy}
+          <div class="hud-label text-hud-dim animate-pulse">resolving geo · asn · ptr…</div>
+        {:else if ipinfo.err}
+          <div class="text-xs font-mono text-neon-red">{ipinfo.err}</div>
+        {:else if ipinfo.data}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
+            <div class="truncate"><span class="hud-label text-hud-dim">location</span> {ipinfo.data.country || '—'}{ipinfo.data.city ? ' · ' + ipinfo.data.city : ''}{ipinfo.data.country_code ? ' (' + ipinfo.data.country_code + ')' : ''}</div>
+            <div class="truncate"><span class="hud-label text-hud-dim">asn</span> {ipinfo.data.asn || '—'}</div>
+            <div class="truncate"><span class="hud-label text-hud-dim">isp</span> {ipinfo.data.isp || ipinfo.data.org || '—'}</div>
+            <div class="truncate"><span class="hud-label text-hud-dim">tz</span> {ipinfo.data.timezone || '—'}</div>
+            <div class="col-span-2 md:col-span-4 truncate"><span class="hud-label text-hud-dim">ptr</span> {ipinfo.data.ptr || '—'}</div>
+          </div>
+          {#if ipinfo.data.geo_error}<div class="text-[11px] font-mono text-neon-amber">geo: {ipinfo.data.geo_error}</div>{/if}
+        {/if}
+      </section>
+    {/if}
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}

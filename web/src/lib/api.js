@@ -42,6 +42,7 @@ export const api = {
   runCheckNow: (id) => req('/api/checks/' + id + '/run', { method: 'POST' }),
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
+  ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmHealth: (id) => req('/api/vms/' + id + '/health'),
   vmResults: (id) => req('/api/vms/' + id + '/results'),
   aiChat: (message, history) => req('/api/ai/chat', { method: 'POST', body: { message, history } }),

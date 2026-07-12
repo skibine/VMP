@@ -25,6 +25,7 @@ import (
 func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
+	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -84,6 +85,26 @@ func (a *crudAPI) batteryVM(w http.ResponseWriter, r *http.Request) {
 	reg := monitor.DefaultRegistry()
 	outcomes := monitor.Battery(r.Context(), reg, vm, 6*time.Second)
 	writeJSON(w, http.StatusOK, monitor.Summarize(outcomes))
+}
+
+// ipInfoVM returns the geo/ASN/PTR info for the VM's public IP (Plane A, keyless).
+func (a *crudAPI) ipInfoVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	vm, err := a.st.GetVM(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "ipInfoVM", err)
+		return
+	}
+	ip := vm.IP
+	if ip == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "vm has no IP; IP-info needs a public IP"})
+		return
+	}
+	info, _ := monitor.LookupIPInfo(r.Context(), ip)
+	writeJSON(w, http.StatusOK, info)
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.
