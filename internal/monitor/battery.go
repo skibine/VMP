@@ -27,6 +27,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,11 +71,19 @@ func BuildBatterySpecs(vm store.VM) []ProbeSpec {
 	}
 	if host != "" {
 		specs = append(specs,
-			ProbeSpec{Name: "web", Type: "http", Target: host, Params: map[string]any{"url": "http://" + host + "/", "timeout_sec": float64(4)}},
+			ProbeSpec{Name: "web", Type: "http", Target: host, Params: map[string]any{"url": httpURL(host), "timeout_sec": float64(4)}},
 			ProbeSpec{Name: "tls", Type: "tls", Target: host, Params: map[string]any{"port": "443", "timeout_sec": float64(4)}},
 		)
 	}
 	return specs
+}
+
+// httpURL builds an http:// URL for the host, bracketing IPv6 literals (http://[2001:db8::1]/).
+func httpURL(host string) string {
+	if net.ParseIP(host) != nil && strings.Contains(host, ":") {
+		return "http://[" + host + "]/"
+	}
+	return "http://" + host + "/"
 }
 
 // isDomainName reports whether s is a non-empty name that is NOT an IP literal.

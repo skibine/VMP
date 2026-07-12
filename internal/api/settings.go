@@ -31,6 +31,7 @@ func registerSettings(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("PUT /api/settings/ai", a.updateAISettings)
 
 	mux.HandleFunc("GET /api/vms/{id}/credentials", a.getVMCreds)
+	mux.HandleFunc("GET /api/vms/{id}/inventory", a.vmInventory)
 	mux.HandleFunc("PUT /api/vms/{id}/credentials", a.setVMCreds)
 	mux.HandleFunc("DELETE /api/vms/{id}/credentials", a.deleteVMCreds)
 	mux.HandleFunc("PUT /api/vms/{id}/ai-access", a.setAIAccess)
@@ -91,14 +92,41 @@ func (a *crudAPI) getVMCreds(w http.ResponseWriter, r *http.Request) {
 		resp["ssh_user"] = creds.SSHUser
 		resp["auth_type"] = creds.AuthType
 		// Surface the persisted inventory so the "system // profile" block survives navigation.
+		// Strip the heavy packages_list here (it can be hundreds of names) — fetched lazily on
+		// expand via GET /api/vms/{id}/inventory so the hot detail-load stays light.
 		if creds.Inventory != "" {
-			var inv any
+			var inv map[string]any
 			if err := json.Unmarshal([]byte(creds.Inventory), &inv); err == nil {
+				delete(inv, "packages_list")
 				resp["inventory"] = inv
 			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// vmInventory returns the FULL persisted SSH inventory (incl. packages_list) for the lazy-loaded
+// "packages" details block. Plane-B read of stored inventory (no SSH round-trip).
+func (a *crudAPI) vmInventory(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	creds, has, err := a.st.GetVMCredentials(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "vmInventory", err)
+		return
+	}
+	if !has || creds.Inventory == "" {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	var inv any
+	if err := json.Unmarshal([]byte(creds.Inventory), &inv); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, inv)
 }
 
 func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {

@@ -45,6 +45,7 @@ export const api = {
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   vmVHosts: (id) => req('/api/vms/' + id + '/vhosts'),
+  vmInventory: (id) => req('/api/vms/' + id + '/inventory'),
   siteInfo: (id, url) => req('/api/vms/' + id + '/siteinfo' + (url ? '?url=' + encodeURIComponent(url) : '')),
   listDomains: () => req('/api/domains'),
   createDomain: (d) => req('/api/domains', { method: 'POST', body: d }),

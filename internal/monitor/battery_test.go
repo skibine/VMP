@@ -116,3 +116,22 @@ func TestBattery_Timeout(t *testing.T) {
 		t.Logf("[IMP:7][Battery][PROBE] %s=%s", o.Name, o.Status)
 	}
 }
+
+// region FUNC_test_HTTPURL [DOMAIN(6): Testing; CONCEPT(6): Parsing; TECH(3): net]
+// @purpose Verify the web-probe URL brackets IPv6 literals but not hostnames/IPv4.
+// @complexity 2
+// endregion FUNC_test_HTTPURL
+func TestHTTPURL(t *testing.T) {
+	cases := map[string]string{
+		"example.com": "http://example.com/",
+		"10.0.0.5":    "http://10.0.0.5/",
+		"2001:db8::1": "http://[2001:db8::1]/",
+		"::1":         "http://[::1]/",
+	}
+	for host, want := range cases {
+		if got := httpURL(host); got != want {
+			t.Errorf("httpURL(%q)=%q want %q", host, got, want)
+		}
+	}
+	t.Logf("[IMP:8][TestHTTPURL][RESULT] %d cases passed", len(cases))
+}

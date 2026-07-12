@@ -37,6 +37,10 @@
   // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
   let ipinfo = { data: null, busy: false, err: '' }
 
+  // Packages list is lazy-loaded (the full list can be hundreds of names; not worth shipping on
+  // every detail open) — fetched only when the "packages" details block is expanded.
+  let packagesList = null
+
   // Recent log errors (journalctl) — Plane B one-shot over SSH.
   let errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
 
@@ -126,6 +130,16 @@
     }
   }
 
+  async function loadPackages() {
+    if (packagesList) return // already loaded for this VM
+    try {
+      const d = await api.vmInventory(vmId)
+      packagesList = d.packages_list || []
+    } catch (e) {
+      packagesList = []
+    }
+  }
+
   // loadDetail(id, soft): soft=true keeps the view mounted (no loading flip) so opened <details>,
   // terminal, etc. are not unmounted+remounted on a refresh (otherwise <details> collapses).
   async function loadDetail(id, soft = false) {
@@ -133,6 +147,7 @@
       loading = true
       err = ''
       system = null
+      packagesList = null
       validate = { kind: '', detail: '' }
     }
     try {
@@ -543,10 +558,16 @@
             <div class="flex flex-wrap gap-1 mt-1">{#each system.services_list as svc}<span class="text-emerald-200/70 border border-hud-line rounded px-1">{svc}</span>{/each}</div>
           </details>
         {/if}
-        {#if system.packages_list?.length}
-          <details class="text-xs font-mono">
+        {#if system.packages != null}
+          <details class="text-xs font-mono" on:open={loadPackages}>
             <summary class="hud-label text-hud-dim cursor-pointer">packages ({system.packages})</summary>
-            <div class="flex flex-wrap gap-1 mt-1 max-h-32 overflow-auto">{#each system.packages_list as p}<span class="text-emerald-200/60 border border-hud-line rounded px-1">{p}</span>{/each}</div>
+            {#if packagesList === null}
+              <div class="hud-label text-hud-dim mt-1 animate-pulse">loading…</div>
+            {:else if packagesList.length}
+              <div class="flex flex-wrap gap-1 mt-1 max-h-32 overflow-auto">{#each packagesList as p}<span class="text-emerald-200/60 border border-hud-line rounded px-1">{p}</span>{/each}</div>
+            {:else}
+              <div class="hud-label text-hud-dim mt-1">no package list</div>
+            {/if}
           </details>
         {/if}
       </section>
