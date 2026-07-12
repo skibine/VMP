@@ -16,6 +16,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/skibine/vm-pulse/internal/monitor"
 )
@@ -23,6 +24,7 @@ import (
 // registerDiagnostics wires the on-demand endpoints.
 func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
+	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -65,6 +67,23 @@ func (a *crudAPI) diagnoseVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": string(res.Status), "latency_ms": res.LatencyMS, "message": res.Message, "detail": res.Detail,
 	})
+}
+
+// batteryVM runs the fixed credential-less probe battery (ssh/dns/web/tls) in parallel and
+// returns the reachability summary. Auto-run by the UI on VM select (Plane A liveness).
+func (a *crudAPI) batteryVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	vm, err := a.st.GetVM(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "batteryVM", err)
+		return
+	}
+	reg := monitor.DefaultRegistry()
+	outcomes := monitor.Battery(r.Context(), reg, vm, 6*time.Second)
+	writeJSON(w, http.StatusOK, monitor.Summarize(outcomes))
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.

@@ -28,10 +28,11 @@
   let system = null // inventory from cred-save probe
 
   let diag = { check_type: 'tcp', param: '', busy: false, msg: '', res: null }
-  let pingBusy = false
-  let pingMsg = ''
-  let nc = { check_type: 'ping', target: '', interval_sec: 60 }
+  let nc = { check_type: 'tcp', target: '', interval_sec: 60 }
   let checkMsg = ''
+
+  // Quick-status battery: fixed credential-less probes (ssh/dns/web/tls) auto-run on select.
+  let battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: '' }
 
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
@@ -48,6 +49,17 @@
   let metricsTimer = null
 
   $: vmId != null && loadDetail(vmId)
+  $: vmId != null && loadBattery(vmId)
+
+  async function loadBattery(id) {
+    battery = { probes: [], reachable: false, latency_ms: 0, busy: true, err: '' }
+    try {
+      const b = await api.battery(id)
+      battery = { probes: b.probes || [], reachable: !!b.reachable, latency_ms: b.latency_ms || 0, busy: false, err: '' }
+    } catch (e) {
+      battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: e.message }
+    }
+  }
 
   // loadDetail(id, soft): soft=true keeps the view mounted (no loading flip) so opened <details>,
   // terminal, etc. are not unmounted+remounted on a refresh (otherwise <details> collapses).
@@ -82,8 +94,6 @@
     }
   }
 
-  $: pingCheck = checks.find((c) => c.check_type === 'ping')
-  $: pingResult = pingCheck ? results.find((x) => x.check_id === pingCheck.id) : null
   $: healthWord = !health ? '' : health.status === 'ok' ? 'up' : health.status === 'critical' ? 'down' : health.status === 'warn' ? 'degraded' : 'unknown'
   $: healthColor = healthWord === 'up' ? 'neon-green' : healthWord === 'down' ? 'neon-red' : healthWord === 'degraded' ? 'neon-amber' : 'hud-dim'
   $: healthReason = (() => {
@@ -91,29 +101,6 @@
     const bad = (health.breakdown || []).find((b) => b.status && b.status !== 'ok')
     return bad ? `${bad.check_type} ${bad.status}` : health.status
   })()
-
-  async function pingNow() {
-    if (!pingCheck) return
-    pingBusy = true
-    pingMsg = ''
-    try {
-      await api.runCheckNow(pingCheck.id)
-      await loadDetail(vmId, true)
-    } catch (e) {
-      pingMsg = e.message
-    } finally {
-      pingBusy = false
-    }
-  }
-
-  async function addPing() {
-    try {
-      await api.createCheck({ vm_id: vmId, target_type: 'vm', check_type: 'ping', interval_sec: 60 })
-      await loadDetail(vmId, true)
-    } catch (e) {
-      pingMsg = e.message
-    }
-  }
 
   async function runDiag() {
     diag.busy = true
@@ -374,32 +361,36 @@
       </section>
     {/if}
 
-    <!-- Row: liveness | diagnostics (compact, two columns) -->
+    <!-- Status battery (auto-run on select) + one-shot tools -->
     <div class="grid grid-cols-2 gap-3">
       <section class="hud-panel p-3 space-y-2">
-        <div class="hud-label text-neon-cyan">liveness&nbsp;//&nbsp;ping</div>
-        {#if pingCheck}
-          <div class="flex items-center gap-2 flex-wrap">
-            {#if pingResult}
-              <span class="hud-label {pingResult.latest_status === 'ok' ? 'text-neon-green' : pingResult.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'} uppercase">{pingResult.latest_status === 'ok' ? 'up' : pingResult.latest_status === 'critical' ? 'down' : 'unknown'}</span>
-              {#if pingResult.latest_status === 'ok'}<span class="text-xs text-hud-dim font-mono">{Number(pingResult.latest_latency_ms).toFixed(1)}ms</span>{/if}
-              <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={pingNow} disabled={pingBusy}>{pingBusy ? '…' : '▶'}</button>
-            {:else}
-              <span class="hud-label text-hud-dim">pending…</span>
-              <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={pingNow} disabled={pingBusy}>{pingBusy ? '…' : '▶ ping now'}</button>
-            {/if}
-          </div>
-          {#if pingMsg}<div class="text-xs font-mono text-neon-red">{pingMsg}</div>{/if}
+        <div class="flex items-center gap-2">
+          <span class="hud-label text-neon-cyan">status&nbsp;//&nbsp;battery</span>
+          {#if !battery.busy && battery.probes.length}
+            <span class="hud-label ml-auto uppercase {battery.reachable ? 'text-neon-green' : 'text-neon-red'}">{battery.reachable ? 'reachable' : 'no ssh'}</span>
+          {/if}
+          <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
+        </div>
+        {#if battery.busy}
+          <div class="hud-label text-hud-dim animate-pulse">probing ssh · dns · web · tls…</div>
+        {:else if battery.err}
+          <div class="text-xs font-mono text-neon-red">{battery.err}</div>
         {:else}
-          <div class="flex items-center gap-2">
-            <span class="hud-label text-hud-dim">no liveness probe</span>
-            <button class="hud-btn hud-btn-primary ml-auto" on:click={addPing}>+ add ping</button>
+          <div class="flex flex-wrap gap-1.5">
+            {#each battery.probes as p}
+              <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono">
+                <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-hud-dim'}">{p.status === 'ok' ? '✓' : '✗'}</span>
+                <span class="text-hud-dim">{p.name}</span>
+                {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
+              </div>
+            {/each}
           </div>
+          {#if !battery.probes.length}<div class="hud-label text-hud-dim">no probes</div>{/if}
         {/if}
       </section>
 
       <section class="hud-panel p-3 space-y-2">
-        <div class="hud-label text-neon-cyan">diagnostics&nbsp;//&nbsp;one-shot</div>
+        <div class="hud-label text-neon-cyan">tools&nbsp;//&nbsp;probe</div>
         <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
           <select class="hud-input" bind:value={diag.check_type}>
             {#each DIAG_TYPES as t}<option value={t}>{t}</option>{/each}

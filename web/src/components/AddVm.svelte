@@ -21,11 +21,12 @@
         ip: ip.trim(),
         port_ssh: Number(port) || 22
       })
-      // Default liveness probe: ICMP ping (Plane A). Best-effort; ignore errors.
+      // Default liveness probe: TCP-reach on the SSH port (Plane A). ICMP is frequently filtered /
+      // needs privileges; a TCP dial to the known SSH port is a reliable, unprivileged signal.
       try {
-        await api.createCheck({ vm_id: res.id, target_type: 'vm', check_type: 'ping', interval_sec: 60 })
+        await api.createCheck({ vm_id: res.id, target_type: 'vm', check_type: 'tcp', interval_sec: 60, params: { port: Number(port) || 22 } })
       } catch (_) {
-        /* ping check optional */
+        /* default reachability check is optional */
       }
       dispatch('created')
     } catch (e) {
