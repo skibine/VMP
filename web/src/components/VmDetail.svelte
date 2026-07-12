@@ -40,6 +40,9 @@
   // Recent log errors (journalctl) — Plane B one-shot over SSH.
   let errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
 
+  // Web-server virtual hosts (nginx/apache config) — Plane B one-shot over SSH.
+  let vhosts = { data: null, busy: false, err: '', kind: '' }
+
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
   let showTerm = false
@@ -93,6 +96,20 @@
       }
     } catch (e) {
       errors = { data: null, busy: false, err: e.message, kind: '', range: errors.range }
+    }
+  }
+
+  async function loadVHosts() {
+    vhosts = { data: null, busy: true, err: '', kind: '' }
+    try {
+      const d = await api.vmVHosts(vmId)
+      if (d.error) {
+        vhosts = { data: null, busy: false, err: d.detail || d.error, kind: d.error }
+      } else {
+        vhosts = { data: d, busy: false, err: '', kind: '' }
+      }
+    } catch (e) {
+      vhosts = { data: null, busy: false, err: e.message, kind: '' }
     }
   }
 
@@ -544,6 +561,24 @@
           </div>
         {:else}
           <div class="hud-label text-neon-green">no errors ✓</div>
+        {/if}
+      {/if}
+    </section>
+
+    <!-- Sites // vhosts (nginx/apache config, Plane B over SSH) -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="hud-label text-neon-cyan">sites&nbsp;//&nbsp;vhosts</span>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadVHosts} disabled={vhosts.busy}>{vhosts.busy ? '…' : '▶ scan'}</button>
+      </div>
+      {#if vhosts.err}
+        <div class="text-xs font-mono text-neon-red">{vhosts.err}{#if vhosts.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+      {:else if vhosts.data}
+        <div class="text-xs font-mono text-hud-dim">server: {vhosts.data.server}</div>
+        {#if vhosts.data.sites?.length}
+          <div class="flex flex-wrap gap-1">{#each vhosts.data.sites as s}<span class="text-emerald-200/80 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono">{s.name}{#if s.port}<span class="text-hud-dim">:{s.port}</span>{/if}</span>{/each}</div>
+        {:else}
+          <div class="hud-label text-hud-dim">no web server / no vhosts</div>
         {/if}
       {/if}
     </section>

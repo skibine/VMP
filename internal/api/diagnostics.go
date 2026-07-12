@@ -27,6 +27,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
+	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -130,6 +131,26 @@ func (a *crudAPI) errorsVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, el)
+}
+
+// vhostsVM returns the web-server virtual-host config over SSH (Plane B; needs creds).
+func (a *crudAPI) vhostsVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	client, _, derr := a.dialer.Dial(r.Context(), id)
+	if derr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": classifyDialKind(derr), "detail": derr.Error()})
+		return
+	}
+	defer client.Close()
+	vl, err := a.dialer.VHosts(r.Context(), client)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "other", "detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, vl)
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.

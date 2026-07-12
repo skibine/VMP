@@ -48,7 +48,7 @@ func (a *Agent) systemPrompt() string {
 	if strings.TrimSpace(a.SystemPrompt) != "" {
 		return a.SystemPrompt
 	}
-	return "You are VM Pulse, an AI copilot for a small fleet of virtual machines. " +
+	return "You are VMPilot, the AI assistant for a small fleet of virtual machines. " +
 		"Use the provided tools to inspect the fleet (VMs, health, check results, alerts) and " +
 		"answer concisely. If a tool returns an error, report it plainly. Do not invent data."
 }

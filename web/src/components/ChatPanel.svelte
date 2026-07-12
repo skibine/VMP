@@ -3,7 +3,7 @@
   import ArtifactRenderer from './ArtifactRenderer.svelte'
 
   // region ChatPanel [DOMAIN(8): AI; CONCEPT(8]: Copilot; TECH(6]: svelte]
-  // Always-visible AI copilot. Parses ```vmpulse-artifact fenced blocks from replies into
+  // Always-visible VMPilot AI assistant. Parses ```vmpulse-artifact fenced blocks from replies into
   // a rendered artifact spec (stub renderer this slice).
   let input = ''
   let busy = false
@@ -58,7 +58,7 @@
       <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 bg-neon-cyan"></span>
       <span class="relative inline-flex rounded-full h-2 w-2 bg-neon-cyan"></span>
     </span>
-    <span class="hud-label text-neon-cyan">copilot</span>
+    <span class="hud-label text-neon-cyan">vmpilot</span>
   </div>
 
   <div class="flex-1 overflow-auto p-3 space-y-3">
@@ -72,7 +72,7 @@
     {/if}
     {#each messages as m}
       <div class="space-y-1">
-        <div class="hud-label">{m.role === 'user' ? '> you' : '< copilot'}</div>
+        <div class="hud-label">{m.role === 'user' ? '> you' : '< vmpilot'}</div>
         {#if m.text}
           <div
             class="text-sm whitespace-pre-wrap {m.role === 'user'
@@ -88,7 +88,7 @@
       </div>
     {/each}
     {#if busy}
-      <div class="hud-label animate-pulse">copilot thinking…</div>
+      <div class="hud-label animate-pulse">vmpilot thinking…</div>
     {/if}
   </div>
 
@@ -96,7 +96,7 @@
     <textarea
       class="hud-input resize-none"
       rows="2"
-      placeholder="ask the copilot… (enter to send)"
+      placeholder="ask vmpilot… (enter to send)"
       bind:value={input}
       on:keydown={onKey}
     ></textarea>
