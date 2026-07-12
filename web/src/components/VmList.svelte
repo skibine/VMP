@@ -1,11 +1,16 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, createEventDispatcher } from 'svelte'
   import { api } from '../lib/api.js'
-  import HealthBadge from './HealthBadge.svelte'
   import AddVm from './AddVm.svelte'
 
+  // region VmList [DOMAIN(7): UI; CONCEPT(7]: MasterList; TECH(6]: svelte]
+  // Compact, scalable VM list (master). Emits 'select' with the vm id; 'add' handled inline.
+  const dispatch = createEventDispatcher()
+
+  export let selectedId = null
+
   let vms = []
-  let health = {} // id -> {status, score}
+  let health = {} // id -> status
   let loading = true
   let error = ''
   let showAdd = false
@@ -19,13 +24,16 @@
         (vms || []).map(async (v) => {
           try {
             const h = await api.vmHealth(v.id)
-            return [v.id, { status: h.status, score: h.score }]
+            return [v.id, h.status]
           } catch (_) {
-            return [v.id, { status: 'unknown', score: null }]
+            return [v.id, 'unknown']
           }
         })
       )
       health = Object.fromEntries(entries)
+      if (selectedId === null && vms.length) {
+        dispatch('select', vms[0].id)
+      }
     } catch (e) {
       error = e.message
     } finally {
@@ -33,53 +41,54 @@
     }
   }
 
+  function color(status) {
+    return status === 'ok'
+      ? 'neon-green'
+      : status === 'warn'
+        ? 'neon-amber'
+        : status === 'critical'
+          ? 'neon-red'
+          : 'hud-dim'
+  }
+
   onMount(load)
 </script>
 
-<div class="space-y-4">
-  <div class="flex items-center gap-3">
-    <h2 class="hud-label">fleet&nbsp;//&nbsp;{vms.length ?? 0}&nbsp;vm</h2>
-    <button class="hud-btn ml-auto" on:click={() => (showAdd = !showAdd)}>
-      {showAdd ? 'close' : '+ add vm'}
+<div class="h-full flex flex-col">
+  <div class="flex items-center gap-2 px-3 py-2 border-b border-hud-line">
+    <span class="hud-label">fleet&nbsp;//&nbsp;{vms.length ?? 0}</span>
+    <button class="hud-btn ml-auto !px-2 !py-1" on:click={() => (showAdd = !showAdd)}>
+      {showAdd ? '✕' : '+ vm'}
     </button>
   </div>
 
   {#if showAdd}
-    <div class="hud-panel p-4">
+    <div class="p-3 border-b border-hud-line">
       <AddVm on:created={() => { showAdd = false; load() }} />
     </div>
   {/if}
 
-  {#if loading}
-    <div class="hud-label animate-pulse">scanning fleet…</div>
-  {:else if error}
-    <div class="text-xs text-neon-red font-mono">{error}</div>
-  {:else if !vms.length}
-    <div class="hud-panel p-6 text-center">
-      <div class="hud-label mb-2">no vms registered</div>
-      <p class="text-xs text-hud-dim">Add your first VM to start monitoring.</p>
-    </div>
-  {:else}
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+  <div class="flex-1 overflow-auto">
+    {#if loading}
+      <div class="px-3 py-2 hud-label animate-pulse">scanning…</div>
+    {:else if error}
+      <div class="px-3 py-2 text-xs text-neon-red font-mono">{error}</div>
+    {:else if !vms.length}
+      <div class="px-3 py-4 hud-label">no vms — add one</div>
+    {:else}
       {#each vms as vm (vm.id)}
-        {@const h = health[vm.id] ?? { status: 'unknown', score: null }}
-        <div class="hud-panel scan p-4 space-y-3 hover:border-neon-green/40 transition-colors">
-          <div class="flex items-start gap-2">
-            <div class="min-w-0">
-              <div class="font-mono text-neon-green truncate">{vm.name}</div>
-              <div class="text-xs text-hud-dim font-mono truncate">{vm.ip || vm.hostname}</div>
-            </div>
-          </div>
-          <HealthBadge status={h.status} score={h.score} />
-          {#if vm.tags?.length}
-            <div class="flex flex-wrap gap-1">
-              {#each vm.tags as t}
-                <span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{t}</span>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        {@const st = health[vm.id] ?? 'unknown'}
+        <button
+          class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selectedId === vm.id ? 'bg-hud-panel2 border-l-2 border-l-neon-green' : ''}"
+          on:click={() => dispatch('select', vm.id)}
+        >
+          <span class="h-2 w-2 rounded-full bg-{color(st)} shrink-0"></span>
+          <span class="min-w-0">
+            <span class="block font-mono text-sm text-emerald-100 truncate">{vm.name}</span>
+            <span class="block text-[10px] text-hud-dim font-mono truncate">{vm.ip || vm.hostname}</span>
+          </span>
+        </button>
       {/each}
-    </div>
-  {/if}
+    {/if}
+  </div>
 </div>

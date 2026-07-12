@@ -14,6 +14,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/skibine/vm-pulse/internal/ai"
@@ -43,6 +44,11 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 	}
 	reply, err := s.agent.Ask(r.Context(), body.Message, body.History)
 	if err != nil {
+		if errors.Is(err, ai.ErrNotConfigured) {
+			logging.LDD(s.logger, 7, "aiChat", "DISABLED", "ai not configured")
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ai not configured"})
+			return
+		}
 		logging.LDD(s.logger, 10, "aiChat", "ASK_FAIL", err.Error())
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "ai: " + err.Error()})
 		return

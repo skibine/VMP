@@ -186,43 +186,68 @@ func (e *Engine) worker() {
 }
 
 // region FUNC_runCheck [DOMAIN(8): Monitoring; CONCEPT(8): Execute; TECH(7): Checker]
-// @purpose Resolve the target, run the checker, apply thresholds, persist the result.
-// @complexity 6
+// @purpose Delegate a scheduled check to the shared executor.
 // endregion FUNC_runCheck
 func (e *Engine) runCheck(c store.Check) {
-	target, err := e.resolveTarget(c)
-	if err != nil {
-		e.persist(c.ID, Result{Status: StatusUnknown, Message: "resolve target: " + err.Error()})
-		return
-	}
-	chk, ok := e.reg.Get(c.CheckType)
-	if !ok {
-		e.persist(c.ID, Result{Status: StatusUnknown, Message: "no checker for type: " + c.CheckType})
-		return
-	}
-	res := chk.Run(e.ctx, target, c.Params)
-	res = applyThresholds(res, c.Thresholds)
-	e.persist(c.ID, res)
+	_, _ = ExecuteCheck(e.ctx, e.store, e.reg, e.logger, c)
 }
 
-// persist writes a result and logs the outcome.
-func (e *Engine) persist(checkID int64, res Result) {
-	if _, err := e.store.InsertCheckResult(e.ctx, checkID, string(res.Status), res.LatencyMS, res.Message, res.Detail); err != nil {
-		logging.LDD(e.logger, 10, "persist", "INSERT_FAIL", err.Error())
+// region FUNC_ExecuteCheck [DOMAIN(8): Monitoring; CONCEPT(8): Execute; TECH(7): Checker]
+// @purpose Resolve target, run checker, apply thresholds, persist result. Shared by the engine
+//
+//	and the "run now" endpoint.
+//
+// @complexity 6
+// endregion FUNC_ExecuteCheck
+func ExecuteCheck(ctx context.Context, s *store.Store, reg *Registry, logger *slog.Logger, c store.Check) (Result, error) {
+	target, err := resolveTarget(ctx, s, c)
+	if err != nil {
+		res := Result{Status: StatusUnknown, Message: "resolve target: " + err.Error()}
+		persistResult(ctx, s, logger, c.ID, res)
+		return res, err
+	}
+	chk, ok := reg.Get(c.CheckType)
+	if !ok {
+		res := Result{Status: StatusUnknown, Message: "no checker for type: " + c.CheckType}
+		persistResult(ctx, s, logger, c.ID, res)
+		return res, fmt.Errorf("no checker for type: %s", c.CheckType)
+	}
+	res := chk.Run(ctx, target, c.Params)
+	res = applyThresholds(res, c.Thresholds)
+	persistResult(ctx, s, logger, c.ID, res)
+	return res, nil
+}
+
+// region FUNC_RunProbe [DOMAIN(8): Monitoring; CONCEPT(7): AdHoc; TECH(6): Checker]
+// @purpose Run a single ad-hoc probe (diagnostics) WITHOUT persisting. Returns the Result.
+// @complexity 3
+// endregion FUNC_RunProbe
+func RunProbe(ctx context.Context, reg *Registry, checkType, target string, params map[string]any) (Result, error) {
+	chk, ok := reg.Get(checkType)
+	if !ok {
+		return Result{Status: StatusUnknown, Message: "no checker for type: " + checkType}, fmt.Errorf("no checker for type: %s", checkType)
+	}
+	return chk.Run(ctx, target, params), nil
+}
+
+// persistResult writes a result and logs the outcome.
+func persistResult(ctx context.Context, s *store.Store, logger *slog.Logger, checkID int64, res Result) {
+	if _, err := s.InsertCheckResult(ctx, checkID, string(res.Status), res.LatencyMS, res.Message, res.Detail); err != nil {
+		logging.LDD(logger, 10, "persist", "INSERT_FAIL", err.Error())
 		return
 	}
-	logging.LDD(e.logger, 8, "runCheck", "RESULT",
+	logging.LDD(logger, 8, "runCheck", "RESULT",
 		fmt.Sprintf("check=%d status=%s lat=%.2fms", checkID, res.Status, res.LatencyMS))
 }
 
 // resolveTarget returns the probe target string (vm IP/hostname or domain name).
-func (e *Engine) resolveTarget(c store.Check) (string, error) {
+func resolveTarget(ctx context.Context, s *store.Store, c store.Check) (string, error) {
 	switch c.TargetType {
 	case "vm":
 		if c.VMID == nil {
 			return "", fmt.Errorf("vm check without vm_id")
 		}
-		vm, err := e.store.GetVM(e.ctx, *c.VMID)
+		vm, err := s.GetVM(ctx, *c.VMID)
 		if err != nil {
 			return "", err
 		}
@@ -234,7 +259,7 @@ func (e *Engine) resolveTarget(c store.Check) (string, error) {
 		if c.DomainID == nil {
 			return "", fmt.Errorf("domain check without domain_id")
 		}
-		d, err := e.store.GetDomain(e.ctx, *c.DomainID)
+		d, err := s.GetDomain(ctx, *c.DomainID)
 		if err != nil {
 			return "", err
 		}

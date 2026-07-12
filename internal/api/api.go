@@ -71,6 +71,7 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("GET /api/auth/me", srv.me)
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
 	RegisterCRUD(mux, s, logger)                    // TODO(auth): wrap CRUD routes with Plane B session middleware
+	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset
 	registerSPA(mux)                                // catch-all "/" serves the embedded frontend
 	srv.srv = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	return srv

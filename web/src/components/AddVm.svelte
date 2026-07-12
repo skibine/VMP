@@ -15,12 +15,18 @@
     error = ''
     busy = true
     try {
-      await api.createVm({
+      const res = await api.createVm({
         name: name.trim(),
         hostname: hostname.trim(),
         ip: ip.trim(),
         port_ssh: Number(port) || 22
       })
+      // Default liveness probe: ICMP ping (Plane A). Best-effort; ignore errors.
+      try {
+        await api.createCheck({ vm_id: res.id, target_type: 'vm', check_type: 'ping', interval_sec: 60 })
+      } catch (_) {
+        /* ping check optional */
+      }
       dispatch('created')
     } catch (e) {
       error = e.message

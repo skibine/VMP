@@ -71,13 +71,16 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 	}
 	start := time.Now()
 	if _, err := c.WriteTo(wb, dst); err != nil {
-		return Result{Status: StatusCritical, Message: "write: " + err.Error()}
+		// Could not even send the ICMP packet: an environment limitation (sandbox/seccomp), not a
+		// target failure -> unknown, with a human-readable reason.
+		return Result{Status: StatusUnknown, Message: "icmp blocked on this host (VM Pulse server needs ping_group_range or CAP_NET_RAW)"}
 	}
 	rb := make([]byte, 1500)
 	n, peer, err := c.ReadFrom(rb)
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 	if err != nil {
-		return Result{Status: StatusCritical, LatencyMS: latency, Message: "read: " + err.Error(),
+		// Sent but no reply: host may be down or dropping ICMP -> critical.
+		return Result{Status: StatusCritical, LatencyMS: latency, Message: "no reply (host down or dropping icmp)",
 			Detail: map[string]any{"target": target}}
 	}
 	rm, err := icmp.ParseMessage(1, rb[:n]) // 1 = ICMPv4 protocol number

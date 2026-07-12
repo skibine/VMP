@@ -32,7 +32,38 @@ export const api = {
   logout: () => req('/api/auth/logout', { method: 'POST' }).catch(() => {}),
   me: () => req('/api/auth/me'),
   listVms: () => req('/api/vms'),
+  getVm: (id) => req('/api/vms/' + id),
   createVm: (vm) => req('/api/vms', { method: 'POST', body: vm }),
+  updateVm: (id, vm) => req('/api/vms/' + id, { method: 'PUT', body: vm }),
+  archiveVm: (id) => req('/api/vms/' + id + '/archive', { method: 'POST' }),
+  deleteVm: (id) => req('/api/vms/' + id, { method: 'DELETE' }),
+  listChecks: (vmId) => req('/api/checks?vm_id=' + vmId),
+  createCheck: (c) => req('/api/checks', { method: 'POST', body: c }),
+  runCheckNow: (id) => req('/api/checks/' + id + '/run', { method: 'POST' }),
+  diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   vmHealth: (id) => req('/api/vms/' + id + '/health'),
-  aiChat: (message, history) => req('/api/ai/chat', { method: 'POST', body: { message, history } })
+  vmResults: (id) => req('/api/vms/' + id + '/results'),
+  aiChat: (message, history) => req('/api/ai/chat', { method: 'POST', body: { message, history } }),
+
+  // Settings
+  getAISettings: () => req('/api/settings/ai'),
+  updateAISettings: (cfg) => req('/api/settings/ai', { method: 'PUT', body: cfg }),
+  getVMCreds: (id) => req('/api/vms/' + id + '/credentials'),
+  setVMCreds: (id, creds) => req('/api/vms/' + id + '/credentials', { method: 'PUT', body: creds }),
+  deleteVMCreds: (id) => req('/api/vms/' + id + '/credentials', { method: 'DELETE' }),
+
+  // Plane B: web-ssh snapshot + TOFU host-key reset.
+  snapshot: (id) => req('/api/vms/' + id + '/snapshot', { method: 'POST' }),
+  resetHostKey: (id) => req('/api/vms/' + id + '/hostkey', { method: 'DELETE' })
+}
+
+// terminalUrl builds the WebSocket URL for an interactive web-ssh session. The session token is
+// passed via ?token= (browsers cannot set Authorization headers on WS handshakes); it is validated
+// server-side and same-origin only.
+export function terminalUrl(vmId) {
+  let t
+  const unsub = token.subscribe((v) => (t = v))
+  unsub()
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${location.host}/api/vms/${vmId}/terminal?token=${encodeURIComponent(t || '')}`
 }

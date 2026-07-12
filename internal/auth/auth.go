@@ -165,7 +165,7 @@ func isPublic(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/api/auth/login"
 }
 
-// extractToken: Authorization: Bearer <token> or cookie vmpulse_session.
+// extractToken: Authorization: Bearer <token>, cookie vmpulse_session, or ?token= (WebSocket).
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
@@ -173,7 +173,9 @@ func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("vmpulse_session"); err == nil {
 		return c.Value
 	}
-	return ""
+	// WebSocket handshakes (browsers cannot set custom headers): allow token via query param.
+	// The token is still validated server-side against sessions; same-origin only in practice.
+	return r.URL.Query().Get("token")
 }
 
 func deny(w http.ResponseWriter, logger *slog.Logger, reason string) {

@@ -70,6 +70,12 @@ func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
 
 	// Alerts: rules, channels, fired alerts.
 	registerAlerts(mux, a)
+
+	// Settings: AI provider config + VM credentials.
+	registerSettings(mux, a)
+
+	// On-demand diagnostics + run-now.
+	registerDiagnostics(mux, a)
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────────

@@ -95,14 +95,13 @@ func main() {
 	server := api.New(s, cfg.Listen, logger)
 	// Plane B: deny-by-default auth on /api/ (healthz + login stay public).
 	server.Use(auth.Middleware(s, logger))
-	if cfg.AI.Configured() {
-		provider := &ai.OpenAIProvider{APIURL: cfg.AI.APIURL, APIKey: cfg.AI.APIKey}
-		registry := ai.NewRegistry(ai.StoreTools(s)...)
-		server.WithAgent(&ai.Agent{Provider: provider, Tools: registry, Model: cfg.AI.Model, Logger: logger})
-		logging.LDD(logger, 9, "main", "AI_READY", "model="+cfg.AI.Model)
-	} else {
-		logging.LDD(logger, 7, "main", "AI_DISABLED", "set ai.api_key to enable the copilot")
-	}
+
+	// AI copilot: migrate config.AI into the settings store once (if present), then wire a
+	// runtime SettingsProvider so AI is configurable from the Settings UI without restart.
+	seedAI(ctx, s, cfg, logger)
+	aiRegistry := ai.NewRegistry(ai.StoreTools(s)...)
+	server.WithAgent(&ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger})
+
 	if err := server.Serve(ctx); err != nil {
 		logging.LDD(logger, 10, "main", "SERVE_FAIL", err.Error())
 		os.Exit(1)
@@ -196,4 +195,31 @@ func armVault(ctx context.Context, s *store.Store, cfg *config.Config, logger *s
 	}
 	s.SetVault(crypto.NewVault(cfg.Vault.Passphrase, salt))
 	logging.LDD(logger, 9, "main", "VAULT_ARMED", "at-rest encryption enabled")
+}
+
+// region FUNC_seedAI [DOMAIN(9): AI; CONCEPT(7): Migration; TECH(6): store]
+// @purpose On first run, migrate ai.* from config into the settings store (key encrypted).
+//
+//	After that the settings store is the source of truth (managed via Settings UI).
+//
+// @complexity 3
+// endregion FUNC_seedAI
+func seedAI(ctx context.Context, s *store.Store, cfg *config.Config, logger *slog.Logger) {
+	has, err := s.HasSetting(ctx, store.SettingAIAPIKey)
+	if err != nil {
+		logging.LDD(logger, 9, "main", "AI_SEED_CHECK_FAIL", err.Error())
+		return
+	}
+	if has {
+		return // already managed via Settings
+	}
+	if !cfg.AI.Configured() {
+		logging.LDD(logger, 7, "main", "AI_NOT_SET", "configure AI in Settings (or ai.* in config)")
+		return
+	}
+	if err := s.SetAIConfig(ctx, store.AIConfig{APIURL: cfg.AI.APIURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model}); err != nil {
+		logging.LDD(logger, 10, "main", "AI_SEED_FAIL", err.Error())
+		return
+	}
+	logging.LDD(logger, 9, "main", "AI_SEEDED", "migrated ai.* from config to settings store")
 }

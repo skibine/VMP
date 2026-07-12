@@ -38,3 +38,6 @@ coverage.out
 .idea/
 .vscode/
 .DS_Store
+
+# Playwright MCP session artifacts (transient screenshots/snapshots)
+/.playwright-mcp/
