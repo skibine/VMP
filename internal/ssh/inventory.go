@@ -34,6 +34,7 @@ echo =up=; uptime
 echo =ports=; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | grep -oE ':[0-9]+' | tr -d : | sort -un | head -60
 echo =docker=; (docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null) | head -30
 echo =pkgs=; (dpkg -l 2>/dev/null | grep -c '^ii') || echo 0
+echo =pkgsn=; (dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | head -400)
 echo =svc=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | wc -l) || echo 0
 echo =svcs=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | awk '{print $1}' | sed 's/\.service$//' | head -80)`
 
@@ -49,6 +50,7 @@ type Inventory struct {
 	Ports        []int    `json:"ports"`
 	Docker       []string `json:"docker"`
 	Packages     int      `json:"packages"`
+	PackagesList []string `json:"packages_list"`
 	Services     int      `json:"services"`
 	ServicesList []string `json:"services_list"`
 }
@@ -126,6 +128,11 @@ func parseInventory(out string) Inventory {
 	inv.Packages = 0
 	if v, err := strconv.Atoi(strings.TrimSpace(sec["pkgs"])); err == nil {
 		inv.Packages = v
+	}
+	for _, line := range strings.Split(sec["pkgsn"], "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			inv.PackagesList = append(inv.PackagesList, name)
+		}
 	}
 	if v, err := strconv.Atoi(strings.TrimSpace(sec["svc"])); err == nil {
 		inv.Services = v

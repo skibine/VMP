@@ -37,6 +37,9 @@
   // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
   let ipinfo = { data: null, busy: false, err: '' }
 
+  // Recent log errors (journalctl) — Plane B one-shot over SSH.
+  let errors = { data: null, busy: false, err: '', range: '24h' }
+
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
   let showTerm = false
@@ -71,6 +74,17 @@
       ipinfo = { data: d, busy: false, err: '' }
     } catch (e) {
       ipinfo = { data: null, busy: false, err: e.message }
+    }
+  }
+
+  async function loadErrors() {
+    errors = { data: null, busy: true, err: '', range: errors.range }
+    try {
+      const d = await api.vmErrors(vmId, errors.range)
+      if (d.error) { errors = { data: null, busy: false, err: d.detail || d.error, range: errors.range } }
+      else { errors = { data: d, busy: false, err: '', range: errors.range } }
+    } catch (e) {
+      errors = { data: null, busy: false, err: e.message, range: errors.range }
     }
   }
 
@@ -490,8 +504,41 @@
             <div class="flex flex-wrap gap-1 mt-1">{#each system.services_list as svc}<span class="text-emerald-200/70 border border-hud-line rounded px-1">{svc}</span>{/each}</div>
           </details>
         {/if}
+        {#if system.packages_list?.length}
+          <details class="text-xs font-mono">
+            <summary class="hud-label text-hud-dim cursor-pointer">packages ({system.packages})</summary>
+            <div class="flex flex-wrap gap-1 mt-1 max-h-32 overflow-auto">{#each system.packages_list as p}<span class="text-emerald-200/60 border border-hud-line rounded px-1">{p}</span>{/each}</div>
+          </details>
+        {/if}
       </section>
     {/if}
+
+    <!-- Logs // errors (journalctl priority=err, Plane B over SSH) -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="hud-label text-neon-cyan">logs&nbsp;//&nbsp;errors</span>
+        {#each ['1h', '24h', '7d'] as r}
+          <button class="hud-btn !py-0.5 {errors.range === r ? 'hud-btn-primary' : ''}" on:click={() => { errors.range = r }}>{r}</button>
+        {/each}
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadErrors} disabled={errors.busy}>{errors.busy ? '…' : '▶ scan'}</button>
+      </div>
+      {#if errors.err}
+        <div class="text-xs font-mono text-neon-red">{errors.err}{#if errors.err.includes('no_ssh_credentials') || errors.err.includes('no_credentials')}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+      {:else if errors.data}
+        <div class="text-xs font-mono text-hud-dim">{errors.data.count} error(s) in last {errors.data.window}</div>
+        {#if errors.data.entries?.length}
+          <div class="space-y-1 max-h-56 overflow-auto">
+            {#each errors.data.entries as e}
+              <div class="text-xs font-mono border-l-2 border-neon-red/40 pl-2">
+                <span class="text-hud-dim">{e.ts.slice(11)}</span> <span class="text-neon-amber">{e.unit}</span> <span class="text-emerald-200/70 break-all">{e.msg}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="hud-label text-neon-green">no errors ✓</div>
+        {/if}
+      {/if}
+    </section>
 
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
     <section class="hud-panel p-3 space-y-2">

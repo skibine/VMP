@@ -43,6 +43,7 @@ export const api = {
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
+  vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   setAIAccess: (id, enabled) => req('/api/vms/' + id + '/ai-access', { method: 'PUT', body: { enabled } }),
   vmHealth: (id) => req('/api/vms/' + id + '/health'),
   vmResults: (id) => req('/api/vms/' + id + '/results'),

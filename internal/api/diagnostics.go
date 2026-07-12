@@ -26,6 +26,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
+	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -105,6 +106,30 @@ func (a *crudAPI) ipInfoVM(w http.ResponseWriter, r *http.Request) {
 	}
 	info, _ := monitor.LookupIPInfo(r.Context(), ip)
 	writeJSON(w, http.StatusOK, info)
+}
+
+// errorsVM returns recent priority=err log lines over SSH (Plane B; needs creds).
+func (a *crudAPI) errorsVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	window := r.URL.Query().Get("range")
+	if window == "" {
+		window = "24h"
+	}
+	client, _, derr := a.dialer.Dial(r.Context(), id)
+	if derr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": classifyDialKind(derr), "detail": derr.Error()})
+		return
+	}
+	defer client.Close()
+	el, err := a.dialer.RecentErrors(r.Context(), client, window)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "other", "detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, el)
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.
