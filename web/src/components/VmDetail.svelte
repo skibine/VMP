@@ -38,7 +38,7 @@
   let ipinfo = { data: null, busy: false, err: '' }
 
   // Recent log errors (journalctl) — Plane B one-shot over SSH.
-  let errors = { data: null, busy: false, err: '', range: '24h' }
+  let errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
 
   // Live metrics over SSH (snapshot) + interactive terminal (Plane B).
   let snap = { busy: false, data: null, err: '', kind: '' }
@@ -61,8 +61,10 @@
     battery = { probes: [], reachable: false, latency_ms: 0, busy: true, err: '' }
     try {
       const b = await api.battery(id)
+      if (id !== vmId) return // user switched VM while in flight — drop the stale response
       battery = { probes: b.probes || [], reachable: !!b.reachable, latency_ms: b.latency_ms || 0, busy: false, err: '' }
     } catch (e) {
+      if (id !== vmId) return
       battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: e.message }
     }
   }
@@ -71,20 +73,26 @@
     ipinfo = { data: null, busy: true, err: '' }
     try {
       const d = await api.ipInfo(id)
+      if (id !== vmId) return // stale: a different VM is now selected
       ipinfo = { data: d, busy: false, err: '' }
     } catch (e) {
+      if (id !== vmId) return
       ipinfo = { data: null, busy: false, err: e.message }
     }
   }
 
   async function loadErrors() {
-    errors = { data: null, busy: true, err: '', range: errors.range }
+    errors = { data: null, busy: true, err: '', kind: '', range: errors.range }
     try {
       const d = await api.vmErrors(vmId, errors.range)
-      if (d.error) { errors = { data: null, busy: false, err: d.detail || d.error, range: errors.range } }
-      else { errors = { data: d, busy: false, err: '', range: errors.range } }
+      if (d.error) {
+        // Structured dial-failure token from the backend (canonical: no_credentials / host_key_changed / ...).
+        errors = { data: null, busy: false, err: d.detail || d.error, kind: d.error, range: errors.range }
+      } else {
+        errors = { data: d, busy: false, err: '', kind: '', range: errors.range }
+      }
     } catch (e) {
-      errors = { data: null, busy: false, err: e.message, range: errors.range }
+      errors = { data: null, busy: false, err: e.message, kind: '', range: errors.range }
     }
   }
 
@@ -249,7 +257,7 @@
   }
 
   function classifyErr(m) {
-    if (m.includes('no_ssh_credentials')) return 'no_ssh_credentials'
+    if (m.includes('no_credentials')) return 'no_credentials'
     if (m.includes('host_key_changed')) return 'host_key_changed'
     return 'other'
   }
@@ -266,7 +274,7 @@
 
   function onTermError(e) {
     const m = e.detail || {}
-    if (m.error === 'no_ssh_credentials') termNote = { msg: 'no SSH credentials — set in ⚙ edit', kind: 'no_ssh_credentials' }
+    if (m.error === 'no_credentials') termNote = { msg: 'no SSH credentials — set in ⚙ edit', kind: 'no_credentials' }
     else if (m.error === 'host_key_changed') termNote = { msg: 'host key changed (reinstall/MITM) — reset & reopen', kind: 'host_key_changed' }
     else termNote = { msg: m.detail || m.error || 'connection failed', kind: 'other' }
   }
@@ -523,7 +531,7 @@
         <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadErrors} disabled={errors.busy}>{errors.busy ? '…' : '▶ scan'}</button>
       </div>
       {#if errors.err}
-        <div class="text-xs font-mono text-neon-red">{errors.err}{#if errors.err.includes('no_ssh_credentials') || errors.err.includes('no_credentials')}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+        <div class="text-xs font-mono text-neon-red">{errors.err}{#if errors.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{:else if errors.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}</div>
       {:else if errors.data}
         <div class="text-xs font-mono text-hud-dim">{errors.data.count} error(s) in last {errors.data.window}</div>
         {#if errors.data.entries?.length}
@@ -585,7 +593,7 @@
         {#if snap.err}
           <div class="text-xs font-mono text-neon-red">
             {snap.err}
-            {#if snap.kind === 'no_ssh_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
+            {#if snap.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
             {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
           </div>
         {/if}

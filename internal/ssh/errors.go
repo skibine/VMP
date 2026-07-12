@@ -48,33 +48,50 @@ var journalSince = map[string]string{
 
 // region FUNC_Dialer_RecentErrors [DOMAIN(8): Observability; CONCEPT(7): LogErrors; TECH(8): ssh]
 // @purpose Run a fixed journalctl priority=err probe over an open client and parse recent errors.
-// @complexity 5
+// The remote command is bounded (-n 100) AND the request context can abort it mid-flight.
+// @complexity 6
 // endregion FUNC_Dialer_RecentErrors
 func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window string) (ErrorLog, error) {
 	since, ok := journalSince[window]
 	if !ok {
 		since, window = journalSince["24h"], "24h"
 	}
-	// Fixed command; the only interpolated value comes from the allowlist above.
+	// Fixed command; the only interpolated value comes from the allowlist above. -n bounds the
+	// volume server-side so journalctl never streams an unbounded history before truncation.
 	cmd := fmt.Sprintf(
-		`journalctl -p err --since %q --no-pager -o short-iso 2>/dev/null | tail -100`, since)
+		`journalctl -p err --since %q -n 100 --no-pager -o short-iso 2>/dev/null`, since)
 	sess, err := client.NewSession()
 	if err != nil {
 		return ErrorLog{}, fmt.Errorf("recent-errors: new session: %w", err)
 	}
 	defer sess.Close()
-	out, err := sess.CombinedOutput(cmd)
-	if err != nil {
-		// journalctl may exit non-zero when there are no matching entries; treat as empty.
-		return ErrorLog{Window: window, Count: 0, Entries: []ErrorEntry{}}, nil
+
+	// CombinedOutput blocks until the remote command exits; run it in a goroutine so ctx can abort.
+	type result struct {
+		out []byte
+		err error
 	}
-	el := parseErrors(string(out))
-	el.Window = window
-	return el, nil
+	done := make(chan result, 1)
+	go func() {
+		out, err := sess.CombinedOutput(cmd)
+		done <- result{out, err}
+	}()
+	select {
+	case r := <-done:
+		// journalctl may exit non-zero when there are no matching entries; treat as empty.
+		_ = r.err
+		el := parseErrors(string(r.out))
+		el.Window = window
+		return el, nil
+	case <-ctx.Done():
+		_ = sess.Signal(gossh.SIGKILL) // best-effort abort of the remote command
+		return ErrorLog{Window: window, Count: 0, Entries: []ErrorEntry{}}, ctx.Err()
+	}
 }
 
-// reErrLine matches "<iso-ts> <host> <unit>[pid]: <message>".
-var reErrLine = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(.+?)\[\d+\]:\s*(.*)$`)
+// reErrLine matches "<iso-ts> <host> <unit>[pid]: <message>" with the [pid] optional, so kernel
+// lines ("<iso> <host> kernel: <msg>") and pid-less units are captured too.
+var reErrLine = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(.+?)(?:\[\d+\])?:\s*(.*)$`)
 
 // parseErrors extracts structured entries from journalctl short-iso output (tolerant).
 func parseErrors(out string) ErrorLog {

@@ -79,7 +79,14 @@ func TestStoreTools_listAlerts(t *testing.T) {
 	s := newAIStore(t)
 	ctx := context.Background()
 	rid, _ := s.CreateAlertRule(ctx, store.AlertRule{Name: "r", TriggerStatus: "critical", Severity: "critical", CooldownSec: 60, Enabled: true})
-	_, _ = s.InsertAlert(ctx, store.Alert{RuleID: rid, CheckID: 1, Severity: "critical", Message: "down"})
+
+	// A VM the operator granted AI access, and one they did not.
+	granted, _ := s.CreateVM(ctx, store.VM{Name: "g", Hostname: "10.0.0.9", IP: "10.0.0.9", PortSSH: 22})
+	hidden, _ := s.CreateVM(ctx, store.VM{Name: "h", Hostname: "10.0.0.8", IP: "10.0.0.8", PortSSH: 22})
+	_ = s.SetAIEnabled(ctx, granted, true)
+	gID, hID := granted, hidden
+	_, _ = s.InsertAlert(ctx, store.Alert{RuleID: rid, CheckID: 1, VMID: &gID, Severity: "critical", Message: "granted-vm down"})
+	_, _ = s.InsertAlert(ctx, store.Alert{RuleID: rid, CheckID: 2, VMID: &hID, Severity: "critical", Message: "hidden-vm down"})
 
 	reg := NewRegistry(StoreTools(s)...)
 	out, err := reg.Run(ctx, "list_alerts", nil)
@@ -87,7 +94,14 @@ func TestStoreTools_listAlerts(t *testing.T) {
 		t.Fatalf("list_alerts: %v", err)
 	}
 	var arr []map[string]any
-	if err := json.Unmarshal([]byte(out), &arr); err != nil || len(arr) != 1 {
+	if err := json.Unmarshal([]byte(out), &arr); err != nil {
 		t.Fatalf("list_alerts bad output: %s", out)
 	}
+	if len(arr) != 1 {
+		t.Fatalf("list_alerts must show only the granted-VM alert, got %d: %s", len(arr), out)
+	}
+	if arr[0]["message"] != "granted-vm down" {
+		t.Fatalf("expected granted-vm alert only, got %v", arr[0]["message"])
+	}
+	t.Logf("[IMP:8][TestAlerts][GATE] %d alert(s) returned (hidden-vm excluded)", len(arr))
 }

@@ -146,14 +146,31 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 		if rerr != nil {
 			return fmt.Errorf("read %s: %w", name, rerr)
 		}
-		if _, eerr := s.DB.Exec(string(body)); eerr != nil {
-			return fmt.Errorf("exec %s: %w", name, eerr)
+		// Apply each migration file inside a transaction so a mid-file failure cannot leave the
+		// schema half-applied (which would brick startup on re-run with "duplicate column"). The
+		// schema_versions ledger is updated inside the same tx below, so isApplied stays correct.
+		if err := s.execMigrationTx(context.Background(), string(body), name); err != nil {
+			return fmt.Errorf("exec %s: %w", name, err)
 		}
 		logging.LDD(s.logger, 8, "migrate", "APPLIED", name)
 	}
 	ver, _ := s.LatestVersion()
 	logging.LDD(s.logger, 8, "migrate", "DONE", fmt.Sprintf("latest schema version=%d", ver))
 	return nil
+}
+
+// execMigrationTx applies one migration file's statements atomically. SQLite supports multiple
+// statements in a single Exec; wrapping in BEGIN/COMMIT guarantees all-or-nothing per file.
+func (s *Store) execMigrationTx(ctx context.Context, body, name string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // isApplied reports whether a migration file's version is recorded. The version is derived

@@ -18,7 +18,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -136,16 +135,10 @@ func (a *websshAPI) handleResetHostKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// classifyDialErr turns a dialer error into a machine-readable reason map for the UI.
+// classifyDialErr turns a dialer error into a machine-readable reason map for the UI. It delegates
+// to the single canonical classifier classifyDialKind so every Plane-B path emits one token set.
 func classifyDialErr(err error) map[string]string {
-	switch {
-	case errors.Is(err, ssh.ErrNoCredentials):
-		return map[string]string{"error": "no_ssh_credentials"}
-	case errors.Is(err, ssh.ErrHostKeyChanged):
-		return map[string]string{"error": "host_key_changed", "detail": err.Error()}
-	default:
-		return map[string]string{"error": "ssh_dial_failed", "detail": err.Error()}
-	}
+	return map[string]string{"error": classifyDialKind(err), "detail": err.Error()}
 }
 
 // writeWSClose sends a text JSON error to the browser before closing the WebSocket, so the UI can

@@ -175,7 +175,7 @@ func StoreTools(s *store.Store) []Tool {
 		},
 		{
 			Name:        "list_alerts",
-			Description: "List the most recently fired alerts (newest first).",
+			Description: "List recently fired alerts (newest first), only for VMs the operator granted the assistant access to (ai_enabled).",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"limit": map[string]any{"type": "integer"}},
@@ -189,10 +189,37 @@ func StoreTools(s *store.Store) []Tool {
 				if err != nil {
 					return "", err
 				}
-				return jsonStr(alerts)
+				// Per-VM opt-in: drop alerts tied to a non-granted VM. Domain alerts (vm_id nil) pass.
+				granted, err := aiGrantedVMIDs(ctx, s)
+				if err != nil {
+					return "", err
+				}
+				out := make([]store.Alert, 0, len(alerts))
+				for _, a := range alerts {
+					if a.VMID != nil && !granted[*a.VMID] {
+						continue
+					}
+					out = append(out, a)
+				}
+				return jsonStr(out)
 			},
 		},
 	}
+}
+
+// aiGrantedVMIDs returns the set of VM ids the operator has granted the assistant access to.
+func aiGrantedVMIDs(ctx context.Context, s *store.Store) (map[int64]bool, error) {
+	vms, err := s.ListVMs(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[int64]bool, len(vms))
+	for _, v := range vms {
+		if v.AIEnabled {
+			set[v.ID] = true
+		}
+	}
+	return set, nil
 }
 
 // jsonStr marshals v to a JSON string (never returns an error for these simple types).

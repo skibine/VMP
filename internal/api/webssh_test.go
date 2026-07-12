@@ -113,8 +113,8 @@ func TestWebSSH_SnapshotNoCreds(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("want 409 no creds, got %d %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "no_ssh_credentials") {
-		t.Fatalf("want no_ssh_credentials reason, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "no_credentials") {
+		t.Fatalf("want no_credentials reason, got %s", rec.Body.String())
 	}
 }
 

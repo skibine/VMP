@@ -24,6 +24,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -60,32 +61,58 @@ func (DNSBLChecker) Run(ctx context.Context, target string, params map[string]an
 
 	start := time.Now()
 	listed := []map[string]any{}
+	zonesErrored := 0
 	for _, z := range zones {
 		q := rev + "." + z
 		addrs, err := resolver.LookupHost(qctx, q)
-		if err == nil && len(addrs) > 0 {
+		switch {
+		case err == nil && len(addrs) > 0:
+			// A record present => the IP is listed on this zone.
 			reason := ""
 			if txts, err := resolver.LookupTXT(qctx, q); err == nil && len(txts) > 0 {
 				reason = txts[0]
 			}
 			listed = append(listed, map[string]any{"zone": z, "code": addrs[0], "reason": reason})
+		case isNotFound(err):
+			// NXDOMAIN => genuinely not listed on this zone.
+		default:
+			// Transient DNS failure (timeout/SERVFAIL/refused) => indeterminate, do not count as clean.
+			zonesErrored++
 		}
 	}
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 
-	status := StatusOK
-	msg := fmt.Sprintf("clean (%d zones)", len(zones))
 	if n := len(listed); n > 0 {
-		status = StatusCritical
-		msg = fmt.Sprintf("listed on %d/%d DNSBL zones", n, len(zones))
+		return Result{Status: StatusCritical, LatencyMS: latency,
+			Message: fmt.Sprintf("listed on %d/%d DNSBL zones", n, len(zones)),
+			Detail:  map[string]any{"ip": target, "listed": listed, "zones_checked": len(zones), "listed_count": n}}
 	}
-	return Result{Status: status, LatencyMS: latency, Message: msg,
-		Detail: map[string]any{
-			"ip":            target,
-			"listed":        listed,
-			"zones_checked": len(zones),
-			"listed_count":  len(listed),
-		}}
+	if zonesErrored >= len(zones) {
+		// Could not reach ANY zone — genuinely indeterminate, do NOT report a false "clean".
+		return Result{Status: StatusUnknown, LatencyMS: latency,
+			Message: fmt.Sprintf("dns check failed for all %d zones", zonesErrored),
+			Detail:  map[string]any{"ip": target, "zones_checked": len(zones), "zones_errored": zonesErrored}}
+	}
+	// At least one zone confirmed NXDOMAIN and none listed: report clean, but be transparent about
+	// any zones that could not be queried (partial coverage, not a false negative).
+	if zonesErrored > 0 {
+		return Result{Status: StatusOK, LatencyMS: latency,
+			Message: fmt.Sprintf("clean (%d/%d zones; %d unreachable)", len(zones)-zonesErrored, len(zones), zonesErrored),
+			Detail:  map[string]any{"ip": target, "listed": listed, "zones_checked": len(zones), "zones_errored": zonesErrored}}
+	}
+	return Result{Status: StatusOK, LatencyMS: latency,
+		Message: fmt.Sprintf("clean (%d zones)", len(zones)),
+		Detail:  map[string]any{"ip": target, "listed": listed, "zones_checked": len(zones), "listed_count": 0}}
+}
+
+// isNotFound reports whether err is a genuine NXDOMAIN (name does not exist) vs a transient DNS
+// failure. net.DNSError.IsNotFound distinguishes a true negative from timeout/SERVFAIL/refused.
+func isNotFound(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return dnsErr.IsNotFound
+	}
+	return err != nil
 }
 
 // reverseIPv4 turns "1.2.3.4" into "4.3.2.1"; returns false for non-IPv4.

@@ -31,6 +31,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -57,22 +58,30 @@ type IPInfo struct {
 var geoEndpoint = "https://ipwho.is/"
 
 // region FUNC_LookupIPInfo [DOMAIN(8): Monitoring; CONCEPT(7): IPInfo; TECH(7): net/http,net]
-// @purpose Fetch geo/ASN for the IP and resolve its reverse-DNS; merge into one IPInfo.
-// @complexity 5
+// @purpose Fetch geo/ASN for the IP and resolve its reverse-DNS concurrently; merge into one IPInfo.
+// @complexity 6
 // endregion FUNC_LookupIPInfo
 func LookupIPInfo(ctx context.Context, ip string) (IPInfo, error) {
 	info := IPInfo{IP: ip}
-
-	// PTR is resolved locally and independently; never gated by the geo endpoint.
-	ptrCtx, ptrCancel := context.WithTimeout(ctx, 4*time.Second)
-	if names, err := net.DefaultResolver.LookupAddr(ptrCtx, ip); err == nil && len(names) > 0 {
-		info.PTR = strings.TrimSuffix(names[0], ".")
-	}
-	ptrCancel()
-
-	if err := fetchGeo(ctx, ip, &info); err != nil {
-		info.GeoError = err.Error()
-	}
+	// PTR and geo are independent and write disjoint fields, so run them concurrently (worst-case
+	// wall time ~max(PTR,geo) instead of the sum).
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		ptrCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		if names, err := net.DefaultResolver.LookupAddr(ptrCtx, ip); err == nil && len(names) > 0 {
+			info.PTR = strings.TrimSuffix(names[0], ".")
+		}
+		cancel()
+	}()
+	go func() {
+		defer wg.Done()
+		if err := fetchGeo(ctx, ip, &info); err != nil {
+			info.GeoError = err.Error()
+		}
+	}()
+	wg.Wait()
 	return info, nil
 }
 
