@@ -39,13 +39,19 @@ const (
 // @purpose Hold all runtime settings for a VM Pulse instance.
 // endregion STRUCT_Config
 type Config struct {
-	Mode     string `yaml:"mode"`      // "local" | "server"
-	Listen   string `yaml:"listen"`    // address:port, e.g. "127.0.0.1:8443"
-	DBPath   string `yaml:"db_path"`   // SQLite file path
-	LogLevel string `yaml:"log_level"` // debug | info | warn
-	AI       AI     `yaml:"ai"`
-	Auth     Auth   `yaml:"auth"`
-	Vault    Vault  `yaml:"vault"`
+	Mode     string  `yaml:"mode"`      // "local" | "server"
+	Listen   string  `yaml:"listen"`    // address:port, e.g. "127.0.0.1:8443"
+	DBPath   string  `yaml:"db_path"`   // SQLite file path
+	LogLevel string  `yaml:"log_level"` // debug | info | warn
+	AI       AI      `yaml:"ai"`
+	Auth     Auth    `yaml:"auth"`
+	Vault    Vault   `yaml:"vault"`
+	Metrics  Metrics `yaml:"metrics"`
+}
+
+// Metrics configures the credential-free pull metrics poller (Plane A, SSH pull-over-SSH).
+type Metrics struct {
+	PollIntervalSec int `yaml:"poll_interval_sec"` // poll cadence; default 300 (5 min)
 }
 
 // region STRUCT_Auth [DOMAIN(9): Configuration; CONCEPT(8): Bootstrap; TECH(6): struct]

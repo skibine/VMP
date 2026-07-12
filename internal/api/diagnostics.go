@@ -52,6 +52,10 @@ func (a *crudAPI) diagnoseVM(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = vm.Hostname
 	}
+	// DNS is more meaningful against the hostname (resolve name -> IP); other probes use the IP.
+	if body.CheckType == "dns" && vm.Hostname != "" {
+		target = vm.Hostname
+	}
 	reg := monitor.DefaultRegistry()
 	res, err := monitor.RunProbe(r.Context(), reg, body.CheckType, target, body.Params)
 	if err != nil {

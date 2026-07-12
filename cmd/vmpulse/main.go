@@ -106,7 +106,11 @@ func main() {
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
 	// records CPU/RAM/disk/load samples; hourly downsampling (§5.2). Runs until ctx is cancelled.
-	go metrics.New(s, ssh.New(s, logger), logger).Run(ctx)
+	pollInterval := time.Duration(cfg.Metrics.PollIntervalSec) * time.Second
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Minute // default cadence (60s was too noisy for small fleets)
+	}
+	go metrics.New(s, ssh.New(s, logger), logger).WithInterval(pollInterval).Run(ctx)
 
 	if err := server.Serve(ctx); err != nil {
 		logging.LDD(logger, 10, "main", "SERVE_FAIL", err.Error())

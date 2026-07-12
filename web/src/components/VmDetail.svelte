@@ -10,8 +10,8 @@
   export let vmId = null
 
   const dispatch = createEventDispatcher()
-  const DIAG_TYPES = ['tcp', 'http', 'tls', 'whois'] // ping is the liveness probe, not a diagnostic
-  const MON_TYPES = ['ping', 'tcp', 'http', 'tls', 'whois']
+  const DIAG_TYPES = ['tcp', 'http', 'tls', 'dns'] // ping is liveness; whois moved to Domains
+  const MON_TYPES = ['ping', 'tcp', 'http', 'tls', 'dns']
 
   let vm = null
   let health = null
@@ -443,7 +443,7 @@
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
-        <span class="hud-label text-hud-dim ml-auto">polls via ssh every 60s</span>
+        <span class="hud-label text-hud-dim ml-auto">polls via ssh</span>
         <button class="hud-btn !py-0.5" on:click={toggleMetrics}>{vm.metrics_enabled ? '● on' : '○ off'}</button>
       </div>
       {#if vm.metrics_enabled}

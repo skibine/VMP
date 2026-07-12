@@ -136,6 +136,7 @@ func DefaultRegistry() *Registry {
 		&TCPChecker{},
 		&HTTPChecker{},
 		&TLSChecker{},
+		&DNSChecker{},
 		&WhoisChecker{},
 		&PingChecker{},
 	)
