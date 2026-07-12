@@ -468,39 +468,47 @@
       {/if}
     </section>
 
-    <!-- Live metrics (SSH snapshot, no agent) + interactive terminal -->
+    <!-- Live (interactive terminal) + one-shot snapshot (only when metrics history is off) -->
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;over ssh</span>
-        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : '▶ snapshot'}</button>
-        <button class="hud-btn !py-0.5" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? '✕ close' : '> terminal'}</button>
+        <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;terminal</span>
+        {#if !vm.metrics_enabled}
+          <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : '▶ snapshot'}</button>
+        {/if}
+        <button class="hud-btn !py-0.5 {!vm.metrics_enabled ? '' : 'ml-auto'}" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? '✕ close' : '> terminal'}</button>
       </div>
-      {#if snap.err}
-        <div class="text-xs font-mono text-neon-red">
-          {snap.err}
-          {#if snap.kind === 'no_ssh_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
-          {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
-        </div>
+
+      {#if !vm.metrics_enabled}
+        {#if snap.err}
+          <div class="text-xs font-mono text-neon-red">
+            {snap.err}
+            {#if snap.kind === 'no_ssh_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
+            {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
+          </div>
+        {/if}
+        {#if snap.data}
+          <div class="space-y-1.5">
+            <div>
+              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>memory</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
+              <div class="h-1.5 bg-hud-line rounded"><div class="h-full bg-neon-cyan rounded" style="width:{memPct}%"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>disk /</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
+              <div class="h-1.5 bg-hud-line rounded"><div class="h-full {diskPct > 85 ? 'bg-neon-red' : 'bg-neon-green'} rounded" style="width:{diskPct}%"></div></div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-xs font-mono">
+              <div><span class="hud-label text-hud-dim">load</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
+              <div><span class="hud-label text-hud-dim">cpus</span> <span>{snap.data.cpu_count}</span></div>
+              <div class="truncate"><span class="hud-label text-hud-dim">up</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
+            </div>
+          </div>
+        {:else if !snap.err}
+          <p class="text-xs text-hud-dim">// run a snapshot to fetch CPU / RAM / disk / load over SSH now.</p>
+        {/if}
+      {:else}
+        <p class="text-xs text-hud-dim">// live CPU/RAM/disk/load values are in the metrics history above; enable a terminal session here.</p>
       {/if}
-      {#if snap.data}
-        <div class="space-y-1.5">
-          <div>
-            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>memory</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
-            <div class="h-1.5 bg-hud-line rounded"><div class="h-full bg-neon-cyan rounded" style="width:{memPct}%"></div></div>
-          </div>
-          <div>
-            <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>disk /</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
-            <div class="h-1.5 bg-hud-line rounded"><div class="h-full {diskPct > 85 ? 'bg-neon-red' : 'bg-neon-green'} rounded" style="width:{diskPct}%"></div></div>
-          </div>
-          <div class="grid grid-cols-3 gap-2 text-xs font-mono">
-            <div><span class="hud-label text-hud-dim">load</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
-            <div><span class="hud-label text-hud-dim">cpus</span> <span>{snap.data.cpu_count}</span></div>
-            <div class="truncate"><span class="hud-label text-hud-dim">up</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
-          </div>
-        </div>
-      {:else if !snap.err}
-        <p class="text-xs text-hud-dim">// run a snapshot to fetch CPU / RAM / disk / load over SSH now.</p>
-      {/if}
+
       {#if showTerm}
         <div class="space-y-2">
           {#key termKey}
