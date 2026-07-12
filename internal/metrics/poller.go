@@ -27,6 +27,12 @@ import (
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
+// netPrev holds the previous cumulative network counters for a VM, used to compute rx/tx rates.
+type netPrev struct {
+	rx, tx int64
+	ts     time.Time
+}
+
 // Collector pulls one metric sample set for a VM. *ssh.Dialer satisfies this (its Collect method).
 type Collector interface {
 	Collect(ctx context.Context, vmID int64) (map[string]float64, error)
@@ -40,6 +46,7 @@ type Poller struct {
 	interval time.Duration
 	workers  int
 	keepRaw  time.Duration // raw retention before downsampling (default 7d)
+	prev     sync.Map      // vmID (int64) -> *netPrev, for rx/tx rate computation
 }
 
 // New builds a Poller with sane defaults (60s interval, 4 workers, 7d raw retention).
@@ -130,11 +137,32 @@ func (p *Poller) pollOne(ctx context.Context, id int64, name string) {
 		logging.LDD(p.logger, 9, "pollOne", "COLLECT_FAIL", fmt.Sprintf("vm=%d(%s): %v", id, name, err))
 		return
 	}
+	samples = p.withNetRates(id, samples)
 	if err := p.st.RecordSamples(ctx, id, samples); err != nil {
 		logging.LDD(p.logger, 10, "pollOne", "RECORD_FAIL", err.Error())
 		return
 	}
 	logging.LDD(p.logger, 7, "pollOne", "RECORDED", fmt.Sprintf("vm=%d(%s) metrics=%d", id, name, len(samples)))
+}
+
+// withNetRates converts cumulative net_rx_bytes/net_tx_bytes into per-second KB/s rates using the
+// previous poll's counters. On a counter reset (reboot) or first poll, no rate is emitted.
+func (p *Poller) withNetRates(id int64, samples map[string]float64) map[string]float64 {
+	rx := int64(samples["net_rx_bytes"])
+	tx := int64(samples["net_tx_bytes"])
+	delete(samples, "net_rx_bytes")
+	delete(samples, "net_tx_bytes")
+	now := time.Now()
+	if v, ok := p.prev.Load(id); ok {
+		pr := v.(*netPrev)
+		elapsed := now.Sub(pr.ts).Seconds()
+		if elapsed > 0 && rx >= pr.rx && tx >= pr.tx {
+			samples["net_rx_kbps"] = (float64(rx-pr.rx) / 1024.0) / elapsed
+			samples["net_tx_kbps"] = (float64(tx-pr.tx) / 1024.0) / elapsed
+		}
+	}
+	p.prev.Store(id, &netPrev{rx: rx, tx: tx, ts: now})
+	return samples
 }
 
 func (p *Poller) downsample(ctx context.Context) error {

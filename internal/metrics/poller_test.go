@@ -112,7 +112,40 @@ func TestPoller_DownsampleRunsOnce(t *testing.T) {
 	}
 }
 
-// hasAny reports whether the VM has any raw metric_samples row.
+func TestPoller_NetRatesAcrossPolls(t *testing.T) {
+	s := newTestStore(t)
+	p := New(s, &fakeCollector{}, logging.Setup(slog.LevelDebug, &bytes.Buffer{}))
+	ctx := context.Background()
+	vmID, _ := s.CreateVM(ctx, store.VM{Name: "n", Hostname: "h", PortSSH: 22, MetricsEnabled: true})
+
+	// first poll: cumulative counters, no rate yet (no previous sample)
+	out1 := p.withNetRates(vmID, map[string]float64{"net_rx_bytes": 1000, "net_tx_bytes": 500})
+	if _, hasRate := out1["net_rx_kbps"]; hasRate {
+		t.Fatal("first poll must not emit a rate")
+	}
+	if _, hasCum := out1["net_rx_bytes"]; hasCum {
+		t.Fatal("cumulative net_rx_bytes must be removed from samples")
+	}
+
+	// simulate time passage, then second poll with grown counters -> rate emitted
+	time.Sleep(20 * time.Millisecond)
+	out2 := p.withNetRates(vmID, map[string]float64{"net_rx_bytes": 11000, "net_tx_bytes": 1500})
+	rxRate, ok := out2["net_rx_kbps"]
+	if !ok {
+		t.Fatal("second poll must emit net_rx_kbps")
+	}
+	if rxRate <= 0 {
+		t.Fatalf("net_rx_kbps should be > 0, got %f", rxRate)
+	}
+
+	// counter reset (reboot) -> no rate this cycle, prev updated (no panic)
+	out3 := p.withNetRates(vmID, map[string]float64{"net_rx_bytes": 100, "net_tx_bytes": 50})
+	if _, ok := out3["net_rx_kbps"]; ok {
+		t.Fatal("counter reset must not emit a rate")
+	}
+}
+
+// keep store import referenced even if helpers cover most usage
 func hasAny(ctx context.Context, s *store.Store, vmID int64) (bool, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx,

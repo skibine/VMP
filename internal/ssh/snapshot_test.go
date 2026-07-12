@@ -60,6 +60,17 @@ func TestSplitSections_EmptyMiddle(t *testing.T) {
 	}
 }
 
+func TestNetFromProcDev(t *testing.T) {
+	dev := "Inter-|   Receive ...\n face |bytes ...\n" +
+		"    lo: 1000 10 0 0 0 0 0 0 1000 10 0 0 0 0 0 0\n" +
+		"  eth0: 500000 100 0 0 0 0 0 0 200000 80 0 0 0 0 0 0\n" +
+		"  eth1:    10   1 0 0 0 0 0 0     5   1 0 0 0 0 0 0\n"
+	iface, rx, tx := netFromProcDev(dev)
+	if iface != "eth0" || rx != 500000 || tx != 200000 {
+		t.Errorf("busiest iface: %s rx=%d tx=%d, want eth0/500000/200000", iface, rx, tx)
+	}
+}
+
 func TestParseSnapshot_Realistic(t *testing.T) {
 	s := parseSnapshot(sampleSnapshot)
 	if s.MemTotalMB != 1987 || s.MemUsedMB != 1023 {

@@ -34,21 +34,23 @@ echo =up=; uptime
 echo =ports=; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | grep -oE ':[0-9]+' | tr -d : | sort -un | head -60
 echo =docker=; (docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null) | head -30
 echo =pkgs=; (dpkg -l 2>/dev/null | grep -c '^ii') || echo 0
-echo =svc=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | wc -l) || echo 0`
+echo =svc=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | wc -l) || echo 0
+echo =svcs=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | awk '{print $1}' | sed 's/\.service$//' | head -80)`
 
 // Inventory is a parsed VPS profile (static facts).
 type Inventory struct {
-	OS          string   `json:"os"`
-	Kernel      string   `json:"kernel"`
-	Arch        string   `json:"arch"`
-	CPUModel    string   `json:"cpu_model"`
-	MemTotalMB  int      `json:"mem_total_mb"`
-	SwapTotalMB int      `json:"swap_total_mb"`
-	Uptime      string   `json:"uptime"`
-	Ports       []int    `json:"ports"`
-	Docker      []string `json:"docker"`
-	Packages    int      `json:"packages"`
-	Services    int      `json:"services"`
+	OS           string   `json:"os"`
+	Kernel       string   `json:"kernel"`
+	Arch         string   `json:"arch"`
+	CPUModel     string   `json:"cpu_model"`
+	MemTotalMB   int      `json:"mem_total_mb"`
+	SwapTotalMB  int      `json:"swap_total_mb"`
+	Uptime       string   `json:"uptime"`
+	Ports        []int    `json:"ports"`
+	Docker       []string `json:"docker"`
+	Packages     int      `json:"packages"`
+	Services     int      `json:"services"`
+	ServicesList []string `json:"services_list"`
 }
 
 // region FUNC_Dialer_Inventory [DOMAIN(8): Observability; CONCEPT(8): Inventory; TECH(8): ssh,regex]
@@ -127,6 +129,12 @@ func parseInventory(out string) Inventory {
 	}
 	if v, err := strconv.Atoi(strings.TrimSpace(sec["svc"])); err == nil {
 		inv.Services = v
+	}
+	for _, line := range strings.Split(sec["svcs"], "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			inv.ServicesList = append(inv.ServicesList, line)
+		}
 	}
 	return inv
 }

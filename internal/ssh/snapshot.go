@@ -30,7 +30,7 @@ import (
 // Collects memory/swap (free), root disk (df), uptime, load+proc-count (loadavg), cpu cores (nproc),
 // CPU% via a 1s /proc/stat delta (cstat1/cstat2), and established TCP connections (/proc/net/tcp).
 // Nothing here is derived from user input — this string is the entire attack surface.
-const snapshotCMD = `echo =mem=; free -m; echo =df=; df -hP /; echo =up=; uptime; echo =load=; cat /proc/loadavg; echo =cpu=; nproc; echo =cstat1=; head -n1 /proc/stat; sleep 1; echo =cstat2=; head -n1 /proc/stat; echo =tcp=; awk 'NR>1 && $4=="01"{c++} END{print c+0}' /proc/net/tcp`
+const snapshotCMD = `echo =mem=; free -m; echo =df=; df -hP /; echo =up=; uptime; echo =load=; cat /proc/loadavg; echo =cpu=; nproc; echo =cstat1=; head -n1 /proc/stat; sleep 1; echo =cstat2=; head -n1 /proc/stat; echo =tcp=; awk 'NR>1 && $4=="01"{c++} END{print c+0}' /proc/net/tcp; echo =net=; cat /proc/net/dev`
 
 // Snapshot is the parsed, display-ready result of a one-shot SSH metrics probe.
 type Snapshot struct {
@@ -47,7 +47,10 @@ type Snapshot struct {
 	CPUPct      float64 `json:"cpu_pct"`   // 0..100, 1s average via /proc/stat delta
 	TCPConns    int     `json:"tcp_conns"` // established TCP connections
 	ProcCount   int     `json:"proc_count"`
-	Uptime      string  `json:"uptime"` // human-readable, best-effort
+	NetIface    string  `json:"net_iface"`
+	NetRxBytes  int64   `json:"net_rx_bytes"` // cumulative bytes received on the main interface
+	NetTxBytes  int64   `json:"net_tx_bytes"` // cumulative bytes transmitted on the main interface
+	Uptime      string  `json:"uptime"`       // human-readable, best-effort
 }
 
 // region FUNC_Dialer_Snapshot [DOMAIN(8): Observability; CONCEPT(8): Snapshot; TECH(8): ssh,regex]
@@ -166,7 +169,38 @@ func parseSnapshot(out string) Snapshot {
 		}
 	}
 	s.ProcCount = procCountFromLoadavg(section("load"))
+	s.NetIface, s.NetRxBytes, s.NetTxBytes = netFromProcDev(section("net"))
 	return s
+}
+
+// netFromProcDev parses /proc/net/dev and returns the busiest non-loopback interface and its
+// cumulative rx/tx byte counters. Used by the poller to compute rx/tx rates across polls.
+func netFromProcDev(s string) (iface string, rx, tx int64) {
+	var best string
+	var bestSum int64
+	for _, line := range strings.Split(s, "\n") {
+		i := strings.Index(line, ":")
+		if i <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[:i])
+		if name == "lo" {
+			continue
+		}
+		fields := strings.Fields(line[i+1:])
+		if len(fields) < 9 {
+			continue
+		}
+		r, _ := strconv.ParseInt(fields[0], 10, 64) // rx_bytes
+		t, _ := strconv.ParseInt(fields[8], 10, 64) // tx_bytes
+		if r+t > bestSum {                          // busiest iface (rx+tx) wins
+			bestSum = r + t
+			best = name
+			rx, tx = r, t
+		}
+		iface = best
+	}
+	return iface, rx, tx
 }
 
 // cpuPctFromStat computes a 0..100 CPU busy percentage from two /proc/stat "cpu" lines sampled ~1s
@@ -260,6 +294,8 @@ func (d *Dialer) Collect(ctx context.Context, vmID int64) (map[string]float64, e
 		"cpu_pct":       s.CPUPct,
 		"tcp_conns":     float64(s.TCPConns),
 		"proc_count":    float64(s.ProcCount),
+		"net_rx_bytes":  float64(s.NetRxBytes),
+		"net_tx_bytes":  float64(s.NetTxBytes),
 	}, nil
 }
 func toGB(val, unit string) float64 {

@@ -41,7 +41,7 @@
 
   // Metrics history (pull-poller) + sparklines.
   let metricsRange = '1h'
-  let series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
+  let series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [], net_rx_kbps: [], net_tx_kbps: [] }
   let metricsBusy = false
   let metricsErr = ''
   let metricsTs = ''
@@ -261,7 +261,7 @@
 
   async function loadMetrics() {
     if (!vm || !vm.metrics_enabled) {
-      series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
+      series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [], net_rx_kbps: [], net_tx_kbps: [] }
       return
     }
     metricsBusy = true
@@ -275,7 +275,9 @@
         disk_used_gb: s.disk_used_gb || [],
         load1: s.load1 || [],
         cpu_pct: s.cpu_pct || [],
-        tcp_conns: s.tcp_conns || []
+        tcp_conns: s.tcp_conns || [],
+        net_rx_kbps: s.net_rx_kbps || [],
+        net_tx_kbps: s.net_tx_kbps || []
       }
       metricsTs = (d.latest && d.latest.ts) ? d.latest.ts : ''
     } catch (e) {
@@ -294,7 +296,7 @@
       if (next) {
         await loadMetrics()
       } else {
-        series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
+        series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [], net_rx_kbps: [], net_tx_kbps: [] }
       }
     } catch (e) {
       metricsErr = e.message
@@ -436,6 +438,12 @@
         {#if system.docker?.length}
           <div class="text-xs font-mono space-y-0.5"><span class="hud-label text-hud-dim">docker:</span>{#each system.docker as d}<div class="text-emerald-200/80 pl-2 truncate">▸ {d.replace(/\|/g, ' · ')}</div>{/each}</div>
         {/if}
+        {#if system.services_list?.length}
+          <details class="text-xs font-mono">
+            <summary class="hud-label text-hud-dim cursor-pointer">running services ({system.services_list.length})</summary>
+            <div class="flex flex-wrap gap-1 mt-1">{#each system.services_list as svc}<span class="text-emerald-200/70 border border-hud-line rounded px-1">{svc}</span>{/each}</div>
+          </details>
+        {/if}
       </section>
     {/if}
 
@@ -462,6 +470,8 @@
           <MetricsChart label="disk used" unit="GB" data={series.disk_used_gb} decimals={1} color="#22c55e" />
           <MetricsChart label="load 1m" data={series.load1} decimals={2} color="#eab308" />
           <MetricsChart label="tcp conns" data={series.tcp_conns} color="#38bdf8" />
+          <MetricsChart label="net rx" unit="KB/s" data={series.net_rx_kbps} decimals={1} color="#34d399" />
+          <MetricsChart label="net tx" unit="KB/s" data={series.net_tx_kbps} decimals={1} color="#f472b6" />
         </div>
       {:else}
         <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds.</p>
