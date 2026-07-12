@@ -33,12 +33,12 @@ func (s *Store) CreateVM(ctx context.Context, v VM) (int64, error) {
 INSERT INTO vms
 (name, hostname, ip, port_ssh, ssh_user, auth_type, provider, location_country, location_city,
  tags, group_id, notes, cost_monthly, currency, owner_user_id, agent_enabled, agent_port,
- prometheus_url, record_ssh_sessions, metrics_enabled)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+ prometheus_url, record_ssh_sessions, metrics_enabled, ai_enabled)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled))
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled))
 	if err != nil {
 		logging.LDD(s.logger, 10, "CreateVM", "INSERT_FAIL", err.Error())
 		return 0, fmt.Errorf("CreateVM: %w", err)
@@ -101,16 +101,29 @@ func (s *Store) UpdateVM(ctx context.Context, v VM) error {
 UPDATE vms SET name=?, hostname=?, ip=?, port_ssh=?, ssh_user=?, auth_type=?, provider=?,
  location_country=?, location_city=?, tags=?, group_id=?, notes=?, cost_monthly=?, currency=?,
  owner_user_id=?, agent_enabled=?, agent_port=?, prometheus_url=?, record_ssh_sessions=?, metrics_enabled=?,
- updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+ ai_enabled=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), v.ID)
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled), v.ID)
 	if err != nil {
 		return fmt.Errorf("UpdateVM: %w", err)
 	}
 	return rowsAffected(res, "UpdateVM", v.ID)
+}
+
+// region FUNC_SetAIEnabled [DOMAIN(9): Security; CONCEPT(7): AIAccess; TECH(5): database/sql]
+// @purpose Grant or revoke the AI assistant's access to a single VM (opt-in per VM).
+// @complexity 2
+// endregion FUNC_SetAIEnabled
+func (s *Store) SetAIEnabled(ctx context.Context, id int64, enabled bool) error {
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE vms SET ai_enabled=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, toBoolInt(enabled), id)
+	if err != nil {
+		return fmt.Errorf("SetAIEnabled: %w", err)
+	}
+	return rowsAffected(res, "SetAIEnabled", id)
 }
 
 // region FUNC_ArchiveVM [DOMAIN(8): Storage; CONCEPT(7): SoftDelete; TECH(5): database/sql]
@@ -165,7 +178,7 @@ func vmSelectCols() string {
 	return `SELECT id, name, hostname, ip, port_ssh, ssh_user, auth_type, provider,
  location_country, location_city, tags, group_id, notes, cost_monthly, currency,
  owner_user_id, agent_enabled, agent_port, prometheus_url, record_ssh_sessions, metrics_enabled,
- created_at, updated_at, archived_at FROM vms`
+ ai_enabled, created_at, updated_at, archived_at FROM vms`
 }
 
 // scanVM scans a VM from anything with Scan (both *sql.Row and *sql.Rows).
@@ -175,12 +188,12 @@ func scanVM(sc scanner) (VM, error) {
 	var groupID, ownerID, agentPort sql.NullInt64
 	var cost sql.NullFloat64
 	var archived sql.NullString
-	var agentEnabled, recordSSH, metricsEnabled int
+	var agentEnabled, recordSSH, metricsEnabled, aiEnabled int
 	err := sc.Scan(
 		&v.ID, &v.Name, &v.Hostname, &v.IP, &v.PortSSH, &v.SSHUser, &v.AuthType, &v.Provider,
 		&v.LocationCountry, &v.LocationCity, &tags, &groupID, &v.Notes, &cost, &v.Currency,
 		&ownerID, &agentEnabled, &agentPort, &v.PrometheusURL, &recordSSH, &metricsEnabled,
-		&v.CreatedAt, &v.UpdatedAt, &archived)
+		&aiEnabled, &v.CreatedAt, &v.UpdatedAt, &archived)
 	if err != nil {
 		return v, err
 	}
@@ -196,5 +209,6 @@ func scanVM(sc scanner) (VM, error) {
 	v.AgentEnabled = toBool(agentEnabled)
 	v.RecordSSHSessions = toBool(recordSSH)
 	v.MetricsEnabled = toBool(metricsEnabled)
+	v.AIEnabled = toBool(aiEnabled)
 	return v, nil
 }

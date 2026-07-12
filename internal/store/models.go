@@ -60,6 +60,7 @@ type VM struct {
 	PrometheusURL     string   `json:"prometheus_url"`
 	RecordSSHSessions bool     `json:"record_ssh_sessions"`
 	MetricsEnabled    bool     `json:"metrics_enabled"`
+	AIEnabled         bool     `json:"ai_enabled"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
 	ArchivedAt        *string  `json:"archived_at"`

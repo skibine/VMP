@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -32,6 +33,7 @@ func registerSettings(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/credentials", a.getVMCreds)
 	mux.HandleFunc("PUT /api/vms/{id}/credentials", a.setVMCreds)
 	mux.HandleFunc("DELETE /api/vms/{id}/credentials", a.deleteVMCreds)
+	mux.HandleFunc("PUT /api/vms/{id}/ai-access", a.setAIAccess)
 }
 
 // ── AI settings ─────────────────────────────────────────────────────────────────────
@@ -88,6 +90,13 @@ func (a *crudAPI) getVMCreds(w http.ResponseWriter, r *http.Request) {
 		resp["has_secret"] = creds.Secret != ""
 		resp["ssh_user"] = creds.SSHUser
 		resp["auth_type"] = creds.AuthType
+		// Surface the persisted inventory so the "system // profile" block survives navigation.
+		if creds.Inventory != "" {
+			var inv any
+			if err := json.Unmarshal([]byte(creds.Inventory), &inv); err == nil {
+				resp["inventory"] = inv
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -144,9 +153,32 @@ func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {
 	resp["validated"] = true
 	if inv, err := a.dialer.Inventory(r.Context(), client); err == nil {
 		resp["inventory"] = inv
+		// Persist the profile so it survives VM navigation (was ephemeral before).
+		if blob, err := json.Marshal(inv); err == nil {
+			_ = a.st.SetVMInventory(r.Context(), id, string(blob))
+		}
 	}
 	logging.LDD(a.logger, 8, "setVMCreds", "VALIDATED", "")
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// setAIAccess grants or revokes the AI assistant's access to a single VM (opt-in per VM).
+func (a *crudAPI) setAIAccess(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if err := a.st.SetAIEnabled(r.Context(), id, body.Enabled); err != nil {
+		a.writeErr(w, "setAIAccess", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ai_enabled": body.Enabled})
 }
 
 // classifyDialKind maps a dialer error to a machine-readable kind for the UI.

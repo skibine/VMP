@@ -96,6 +96,7 @@
       results = r || []
       checks = c || []
       cred = { ssh_user: cr.ssh_user || '', auth_type: cr.auth_type || 'password', has_secret: !!cr.has_secret, secret: '', msg: '', ok: false, busy: false }
+      system = cr.inventory || null
       if (v) {
         edit = { name: v.name, hostname: v.hostname, ip: v.ip, port_ssh: v.port_ssh, tags: (v.tags || []).join(', '), notes: v.notes || '' }
       }
@@ -176,6 +177,16 @@
       editMode = false
       await loadDetail(vmId, true)
       dispatch('changed')
+    } catch (e) {
+      editMsg = e.message
+    }
+  }
+
+  async function toggleAIAccess() {
+    const next = !vm.ai_enabled
+    try {
+      await api.setAIAccess(vmId, next)
+      vm = { ...vm, ai_enabled: next }
     } catch (e) {
       editMsg = e.message
     }
@@ -329,7 +340,7 @@
       </div>
       <div class="text-xs text-hud-dim font-mono mt-1">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</div>
       {#if healthReason}<div class="text-[11px] font-mono text-{healthColor} mt-0.5">reason: {healthReason}</div>{/if}
-      {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as t}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{t}</span>{/each}</div>{/if}
+      {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as t}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{t}</span>{/each}<span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{:else}<div class="mt-2"><span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{/if}
       <div class="flex items-center gap-2 mt-3">
         <button class="hud-btn" on:click={() => (editMode = !editMode)}>{editMode ? '✕ close' : '⚙ edit'}</button>
       </div>
@@ -349,6 +360,11 @@
             <label class="block space-y-1 col-span-2"><span class="hud-label">notes</span><textarea class="hud-input resize-none" rows="2" bind:value={edit.notes}></textarea></label>
           </div>
           <div class="flex items-center gap-2 mt-3"><button class="hud-btn hud-btn-primary" on:click={saveEdit}>save vm</button><button class="hud-btn" on:click={archiveVm}>archive</button><button class="hud-btn !text-neon-red border-neon-red/40" on:click={deleteVm}>delete</button>{#if editMsg}<span class="text-xs font-mono text-neon-red">{editMsg}</span>{/if}</div>
+          <label class="flex items-center gap-2 mt-3 cursor-pointer select-none">
+            <input type="checkbox" class="accent-neon-cyan" checked={vm.ai_enabled} on:change={toggleAIAccess} />
+            <span class="hud-label">ai access {vm.ai_enabled ? '(granted)' : '(off)'}</span>
+            <span class="text-[11px] text-hud-dim">// grant the assistant read access to this VM</span>
+          </label>
         </div>
         <div class="border-t border-hud-line pt-3">
           <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">ssh credentials</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">set</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">none</span>{/if}</div>

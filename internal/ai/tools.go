@@ -84,7 +84,7 @@ func StoreTools(s *store.Store) []Tool {
 	return []Tool{
 		{
 			Name:        "list_vms",
-			Description: "List all (non-archived) virtual machines with their ids, names, hostnames and tags.",
+			Description: "List the virtual machines the operator has granted the assistant access to (ai_enabled), with their ids, names, hostnames and tags.",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			Run: func(ctx context.Context, _ map[string]any) (string, error) {
 				vms, err := s.ListVMs(ctx, false)
@@ -100,6 +100,9 @@ func StoreTools(s *store.Store) []Tool {
 				}
 				out := make([]vmSum, 0, len(vms))
 				for _, v := range vms {
+					if !v.AIEnabled { // per-VM opt-in: only granted VMs are visible to the model
+						continue
+					}
 					out = append(out, vmSum{v.ID, v.Name, v.Hostname, v.IP, v.Tags})
 				}
 				return jsonStr(out)
@@ -107,7 +110,7 @@ func StoreTools(s *store.Store) []Tool {
 		},
 		{
 			Name:        "get_vm_health",
-			Description: "Get the K2 health-score (0-100) and status for a VM by its id.",
+			Description: "Get the K2 health-score (0-100) and status for a VM by its id (only if ai access is granted).",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"vm_id": map[string]any{"type": "integer"}},
@@ -118,12 +121,12 @@ func StoreTools(s *store.Store) []Tool {
 				if !ok {
 					return "", fmt.Errorf("vm_id required")
 				}
-				exists, err := s.VMExists(ctx, id)
+				vm, err := s.GetVM(ctx, id)
 				if err != nil {
-					return "", err
-				}
-				if !exists {
 					return jsonStr(map[string]any{"error": "vm not found", "vm_id": id})
+				}
+				if !vm.AIEnabled {
+					return jsonStr(map[string]any{"error": "ai access disabled for this vm", "vm_id": id})
 				}
 				rows, err := s.LatestResultsForVM(ctx, id)
 				if err != nil {
@@ -145,7 +148,7 @@ func StoreTools(s *store.Store) []Tool {
 		},
 		{
 			Name:        "list_vm_results",
-			Description: "List the latest result of each check for a VM by its id.",
+			Description: "List the latest result of each check for a VM by its id (only if ai access is granted).",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"vm_id": map[string]any{"type": "integer"}},
@@ -155,6 +158,13 @@ func StoreTools(s *store.Store) []Tool {
 				id, ok := intArg(args, "vm_id")
 				if !ok {
 					return "", fmt.Errorf("vm_id required")
+				}
+				vm, err := s.GetVM(ctx, id)
+				if err != nil {
+					return jsonStr(map[string]any{"error": "vm not found", "vm_id": id})
+				}
+				if !vm.AIEnabled {
+					return jsonStr(map[string]any{"error": "ai access disabled for this vm", "vm_id": id})
 				}
 				rows, err := s.LatestResultsForVM(ctx, id)
 				if err != nil {

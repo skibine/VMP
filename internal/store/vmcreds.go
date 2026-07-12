@@ -28,6 +28,7 @@ type VMCredentials struct {
 	AuthType      string // password | key | agent
 	Secret        string // password OR private key (plaintext only in RAM)
 	KeyPassphrase string // passphrase for passphrase-protected keys (empty = no passphrase)
+	Inventory     string // last successful SSH inventory JSON (non-secret facts)
 }
 
 // Validate enforces non-empty user for password/key auth (agent needs no secret).
@@ -67,8 +68,8 @@ func (s *Store) GetVMCredentials(ctx context.Context, vmID int64) (VMCredentials
 	var c VMCredentials
 	var rawSecret, rawPass string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT vm_id, ssh_user, auth_type, secret, key_passphrase FROM vm_credentials WHERE vm_id=?`, vmID).
-		Scan(&c.VMID, &c.SSHUser, &c.AuthType, &rawSecret, &rawPass)
+		`SELECT vm_id, ssh_user, auth_type, secret, key_passphrase, inventory FROM vm_credentials WHERE vm_id=?`, vmID).
+		Scan(&c.VMID, &c.SSHUser, &c.AuthType, &rawSecret, &rawPass, &c.Inventory)
 	if err == sql.ErrNoRows {
 		return VMCredentials{}, false, nil
 	}
@@ -78,6 +79,17 @@ func (s *Store) GetVMCredentials(ctx context.Context, vmID int64) (VMCredentials
 	c.Secret = s.decCol(rawSecret)
 	c.KeyPassphrase = s.decCol(rawPass)
 	return c, true, nil
+}
+
+// SetVMInventory persists the last successful SSH inventory JSON for a VM (non-secret facts only).
+func (s *Store) SetVMInventory(ctx context.Context, vmID int64, inventoryJSON string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE vm_credentials SET inventory=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE vm_id=?`,
+		inventoryJSON, vmID)
+	if err != nil {
+		return fmt.Errorf("SetVMInventory: %w", err)
+	}
+	return nil
 }
 
 // DeleteVMCredentials removes stored credentials for a VM.

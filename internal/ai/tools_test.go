@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"bytes"
@@ -33,6 +34,11 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 	s := newAIStore(t)
 	ctx := context.Background()
 	vmID, _ := s.CreateVM(ctx, store.VM{Name: "web1", Hostname: "10.0.0.1", IP: "10.0.0.1", PortSSH: 22, Tags: []string{"prod"}})
+	// A second VM that the operator has NOT granted AI access to — must stay hidden from the model.
+	hiddenID, _ := s.CreateVM(ctx, store.VM{Name: "secret", Hostname: "10.0.0.2", IP: "10.0.0.2", PortSSH: 22})
+	if err := s.SetAIEnabled(ctx, vmID, true); err != nil {
+		t.Fatalf("SetAIEnabled: %v", err)
+	}
 	chkID, _ := s.CreateCheck(ctx, store.Check{VMID: &vmID, TargetType: "vm", CheckType: "tcp", IntervalSec: 60, Enabled: true})
 	_, _ = s.InsertCheckResult(ctx, chkID, "ok", 5.0, "connected", nil)
 
@@ -44,7 +50,7 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 	}
 	var vms []map[string]any
 	if err := json.Unmarshal([]byte(out), &vms); err != nil || len(vms) != 1 || vms[0]["name"] != "web1" {
-		t.Fatalf("list_vms bad output: %s", out)
+		t.Fatalf("list_vms must show only ai-enabled VM (got %d): %s", len(vms), out)
 	}
 
 	out, err = reg.Run(ctx, "get_vm_health", map[string]any{"vm_id": float64(vmID)})
@@ -55,6 +61,13 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &hs); err != nil || hs["status"] != "ok" {
 		t.Fatalf("get_vm_health bad output: %s", out)
 	}
+
+	// Non-granted VM: health tool must refuse and results must be withheld.
+	out, _ = reg.Run(ctx, "get_vm_health", map[string]any{"vm_id": float64(hiddenID)})
+	if !strings.Contains(out, "ai access disabled") {
+		t.Fatalf("non-granted VM must be refused, got: %s", out)
+	}
+	t.Logf("[IMP:8][TestAI][ACCESS] list_vms=%d (hidden excluded), non-granted health refused", len(vms))
 
 	// Unknown tool.
 	if _, err := reg.Run(ctx, "nope", nil); err == nil {
