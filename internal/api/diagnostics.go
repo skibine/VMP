@@ -29,6 +29,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
 	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
 	mux.HandleFunc("GET /api/vms/{id}/siteinfo", a.siteInfoVM)
+	mux.HandleFunc("GET /api/domains/{id}/info", a.domainInfo)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -175,6 +176,21 @@ func (a *crudAPI) siteInfoVM(w http.ResponseWriter, r *http.Request) {
 		url = "http://" + host + "/"
 	}
 	info, _ := monitor.ProbeSite(r.Context(), url)
+	writeJSON(w, http.StatusOK, info)
+}
+
+// domainInfo runs the DNS + cert + whois probe for a domain (Plane A; no credentials).
+func (a *crudAPI) domainInfo(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	d, err := a.st.GetDomain(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "domainInfo", err)
+		return
+	}
+	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
 	writeJSON(w, http.StatusOK, info)
 }
 
