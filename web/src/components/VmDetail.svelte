@@ -41,7 +41,7 @@
 
   // Metrics history (pull-poller) + sparklines.
   let metricsRange = '1h'
-  let series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+  let series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
   let metricsBusy = false
   let metricsErr = ''
   let metricsTs = ''
@@ -251,7 +251,7 @@
 
   async function loadMetrics() {
     if (!vm || !vm.metrics_enabled) {
-      series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+      series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
       return
     }
     metricsBusy = true
@@ -263,7 +263,9 @@
         mem_used_mb: s.mem_used_mb || [],
         swap_used_mb: s.swap_used_mb || [],
         disk_used_gb: s.disk_used_gb || [],
-        load1: s.load1 || []
+        load1: s.load1 || [],
+        cpu_pct: s.cpu_pct || [],
+        tcp_conns: s.tcp_conns || []
       }
       metricsTs = (d.latest && d.latest.ts) ? d.latest.ts : ''
     } catch (e) {
@@ -282,7 +284,7 @@
       if (next) {
         await loadMetrics()
       } else {
-        series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [] }
+        series = { mem_used_mb: [], swap_used_mb: [], disk_used_gb: [], load1: [], cpu_pct: [], tcp_conns: [] }
       }
     } catch (e) {
       metricsErr = e.message
@@ -414,6 +416,8 @@
           <div class="truncate col-span-2"><span class="hud-label text-hud-dim">cpu</span> {system.cpu_model || '—'}</div>
           <div><span class="hud-label text-hud-dim">ram</span> {system.mem_total_mb} MB</div>
           <div><span class="hud-label text-hud-dim">swap</span> {system.swap_total_mb} MB</div>
+          <div><span class="hud-label text-hud-dim">packages</span> {system.packages || '—'}</div>
+          <div><span class="hud-label text-hud-dim">services</span> {system.services || '—'}</div>
           <div class="col-span-2"><span class="hud-label text-hud-dim">up</span> {system.uptime || '—'}</div>
         </div>
         {#if system.ports?.length}
@@ -442,10 +446,12 @@
         </div>
         {#if metricsErr}<div class="text-xs font-mono text-neon-red">{metricsErr}</div>{/if}
         <div class="grid grid-cols-2 gap-2">
+          <MetricsChart label="cpu" unit="%" data={series.cpu_pct} decimals={0} color="#f97316" />
           <MetricsChart label="mem used" unit="MB" data={series.mem_used_mb} color="#22d3ee" />
           <MetricsChart label="swap used" unit="MB" data={series.swap_used_mb} color="#a78bfa" />
           <MetricsChart label="disk used" unit="GB" data={series.disk_used_gb} decimals={1} color="#22c55e" />
           <MetricsChart label="load 1m" data={series.load1} decimals={2} color="#eab308" />
+          <MetricsChart label="tcp conns" data={series.tcp_conns} color="#38bdf8" />
         </div>
       {:else}
         <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds.</p>

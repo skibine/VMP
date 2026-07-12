@@ -24,7 +24,41 @@ const sampleSnapshot = "=mem=\n" +
 	"=load=\n" +
 	"0.10 0.05 0.01 1/123 4567\n" +
 	"=cpu=\n" +
-	"4\n"
+	"4\n" +
+	"=cstat1=\ncpu  100 0 100 800 0 0 0 0\n" +
+	"=cstat2=\ncpu  100 0 100 850 0 0 0 0\n" +
+	"=tcp=\n3\n"
+
+func TestCPUPctFromStat(t *testing.T) {
+	// total1=1000 (idle 800, busy 200); total2=1100 (idle 850, busy 250) -> busyDelta 50 / totalDelta 100 = 50%.
+	l1 := "cpu  100 0 100 800 0 0 0 0"
+	l2 := "cpu  100 0 100 850 0 0 0 0"
+	// recompute: busy = total-idle; t1: 1000-800=200; t2: 1050-850=200 -> 0%. Build a 50% pair instead:
+	l1 = "cpu  100 0 100 800 0" // total 1000 idle 800 busy 200
+	l2 = "cpu  150 0 100 850 0" // total 1100 idle 850 busy 250 -> 50/100 = 50%
+	pct := cpuPctFromStat(l1, l2)
+	if pct < 49.9 || pct > 50.1 {
+		t.Fatalf("cpu pct: got %.2f, want ~50", pct)
+	}
+	if cpuPctFromStat("", l2) != 0 {
+		t.Fatal("missing cstat1 should yield 0")
+	}
+}
+
+func TestSplitSections_EmptyMiddle(t *testing.T) {
+	// An empty section (docker) must NOT swallow the following marker (regression guard).
+	out := "=a=\nfoo\n=docker=\n=pkgs=\n365\n=svc=\n21\n"
+	sec := splitSections(out)
+	if sec["a"] != "foo" {
+		t.Errorf("a: %q", sec["a"])
+	}
+	if sec["docker"] != "" {
+		t.Errorf("empty docker must be '', got %q", sec["docker"])
+	}
+	if sec["pkgs"] != "365" || sec["svc"] != "21" {
+		t.Errorf("pkgs/svc after empty section: %q/%q", sec["pkgs"], sec["svc"])
+	}
+}
 
 func TestParseSnapshot_Realistic(t *testing.T) {
 	s := parseSnapshot(sampleSnapshot)
@@ -39,6 +73,15 @@ func TestParseSnapshot_Realistic(t *testing.T) {
 	}
 	if s.CPUCount != 4 {
 		t.Errorf("cpu: got %d, want 4", s.CPUCount)
+	}
+	// cstat1 total=1000 idle=800; cstat2 total=1050 idle=850 -> busy delta=0 -> 0%? recompute:
+	// total1=100+0+100+800=1000, idle1=800(+0)=800; total2=100+0+100+850=1050, idle2=850;
+	// busyDelta=((1050-850)-(1000-800))=(200-200)=0 -> 0.0%. Use a sample with actual busy growth:
+	if s.TCPConns != 3 {
+		t.Errorf("tcp conns: got %d, want 3", s.TCPConns)
+	}
+	if s.ProcCount != 123 {
+		t.Errorf("proc count: got %d, want 123", s.ProcCount)
 	}
 	if !strings.HasPrefix(s.Uptime, "10 days") {
 		t.Errorf("uptime: got %q, want start with '10 days'", s.Uptime)

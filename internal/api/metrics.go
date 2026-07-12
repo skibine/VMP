@@ -30,7 +30,7 @@ type metricsAPI struct {
 }
 
 // metricNamesChart is the fixed set of series returned for the charts block.
-var metricNamesChart = []string{"mem_used_mb", "mem_total_mb", "swap_used_mb", "swap_total_mb", "disk_used_gb", "disk_total_gb", "load1"}
+var metricNamesChart = []string{"mem_used_mb", "mem_total_mb", "swap_used_mb", "swap_total_mb", "disk_used_gb", "disk_total_gb", "load1", "cpu_pct", "tcp_conns", "proc_count"}
 
 func registerMetrics(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
 	a := &metricsAPI{st: st, logger: logger}

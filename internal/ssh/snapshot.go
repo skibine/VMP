@@ -27,9 +27,10 @@ import (
 )
 
 // snapshotCMD is the single, fixed command run on the VM. Section markers make parsing robust.
-// It collects memory (free), root disk (df), uptime, load average and CPU count. Nothing here is
-// derived from user input — this string is the entire attack surface for the snapshot feature.
-const snapshotCMD = `echo =mem=; free -m; echo =df=; df -hP /; echo =up=; uptime; echo =load=; cat /proc/loadavg; echo =cpu=; nproc`
+// Collects memory/swap (free), root disk (df), uptime, load+proc-count (loadavg), cpu cores (nproc),
+// CPU% via a 1s /proc/stat delta (cstat1/cstat2), and established TCP connections (/proc/net/tcp).
+// Nothing here is derived from user input — this string is the entire attack surface.
+const snapshotCMD = `echo =mem=; free -m; echo =df=; df -hP /; echo =up=; uptime; echo =load=; cat /proc/loadavg; echo =cpu=; nproc; echo =cstat1=; head -n1 /proc/stat; sleep 1; echo =cstat2=; head -n1 /proc/stat; echo =tcp=; awk 'NR>1 && $4=="01"{c++} END{print c+0}' /proc/net/tcp`
 
 // Snapshot is the parsed, display-ready result of a one-shot SSH metrics probe.
 type Snapshot struct {
@@ -43,6 +44,9 @@ type Snapshot struct {
 	Load5       float64 `json:"load5"`
 	Load15      float64 `json:"load15"`
 	CPUCount    int     `json:"cpu_count"`
+	CPUPct      float64 `json:"cpu_pct"`   // 0..100, 1s average via /proc/stat delta
+	TCPConns    int     `json:"tcp_conns"` // established TCP connections
+	ProcCount   int     `json:"proc_count"`
 	Uptime      string  `json:"uptime"` // human-readable, best-effort
 }
 
@@ -83,32 +87,45 @@ var (
 )
 
 // splitSections parses "=tag=\n...\n=tag2=" framed output into a tag->content map. Shared by the
-// snapshot and inventory parsers; tolerant of missing sections.
+// snapshot and inventory parsers; tolerant of missing/empty sections. Markers are lines matching
+// "^=word=$"; empty sections map to "" (they never swallow the following marker).
 func splitSections(out string) map[string]string {
 	res := map[string]string{}
-	for off := 0; off < len(out); {
-		i := strings.Index(out[off:], "=")
-		if i < 0 {
-			break
+	var cur string
+	var body strings.Builder
+	flush := func() {
+		if cur != "" {
+			res[cur] = strings.TrimRight(body.String(), "\n")
 		}
-		i += off
-		end := strings.IndexByte(out[i:], '\n')
-		if end < 0 {
-			break
-		}
-		tag := strings.Trim(out[i:i+end], "=")
-		bodyStart := i + end + 1
-		next := strings.Index(out[bodyStart:], "\n=")
-		var body string
-		if next < 0 {
-			body = out[bodyStart:]
-		} else {
-			body = out[bodyStart : bodyStart+next]
-		}
-		res[tag] = body
-		off = bodyStart + len(body) + 1
 	}
+	for _, ln := range strings.Split(out, "\n") {
+		if isMarker(ln) {
+			flush()
+			cur = strings.Trim(ln, "=")
+			body.Reset()
+		} else {
+			body.WriteString(ln + "\n")
+		}
+	}
+	flush()
 	return res
+}
+
+// isMarker reports whether a line is a section marker like "=cpu=" or "=cstat1=".
+func isMarker(ln string) bool {
+	if len(ln) < 3 || ln[0] != '=' || ln[len(ln)-1] != '=' {
+		return false
+	}
+	inner := ln[1 : len(ln)-1]
+	if inner == "" {
+		return false
+	}
+	for _, r := range inner {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // parseSnapshot splits the combined output by section markers and extracts metrics tolerantly.
@@ -142,7 +159,73 @@ func parseSnapshot(out string) Snapshot {
 			s.CPUCount = n
 		}
 	}
+	s.CPUPct = cpuPctFromStat(section("cstat1"), section("cstat2"))
+	if t := strings.TrimSpace(section("tcp")); t != "" {
+		if n, err := strconv.Atoi(t); err == nil {
+			s.TCPConns = n
+		}
+	}
+	s.ProcCount = procCountFromLoadavg(section("load"))
 	return s
+}
+
+// cpuPctFromStat computes a 0..100 CPU busy percentage from two /proc/stat "cpu" lines sampled ~1s
+// apart. Returns 0 when either sample is missing or the delta is non-positive.
+func cpuPctFromStat(line1, line2 string) float64 {
+	t1, i1, ok1 := cpuStatTicks(line1)
+	t2, i2, ok2 := cpuStatTicks(line2)
+	if !ok1 || !ok2 || t2-t1 <= 0 {
+		return 0
+	}
+	busyDelta := (t2 - i2) - (t1 - i1)
+	totalDelta := t2 - t1
+	pct := 100 * float64(busyDelta) / float64(totalDelta)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
+}
+
+// cpuStatTicks returns (totalTicks, idleTicks, ok) from a /proc/stat cpu aggregate line. total is the
+// sum of all tick columns; idle is idle+iowait (standard "idle" accounting).
+func cpuStatTicks(line string) (int64, int64, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 || fields[0] != "cpu" {
+		return 0, 0, false
+	}
+	var total int64
+	for _, f := range fields[1:] {
+		n, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		total += n
+	}
+	idle, _ := strconv.ParseInt(fields[4], 10, 64) // idle (index 4: cpu user nice system IDLE)
+	idleIowait := idle
+	if len(fields) >= 6 {
+		iow, _ := strconv.ParseInt(fields[5], 10, 64)
+		idleIowait += iow
+	}
+	return total, idleIowait, true
+}
+
+// procCountFromLoadavg parses the 4th field of /proc/loadavg ("running/total") -> total process count.
+func procCountFromLoadavg(s string) int {
+	// fields: "0.10 0.05 0.01 1/123 4567" -> 4th field "1/123"
+	fields := strings.Fields(s)
+	if len(fields) < 4 {
+		return 0
+	}
+	parts := strings.SplitN(fields[3], "/", 2)
+	if len(parts) != 2 {
+		return 0
+	}
+	n, _ := strconv.Atoi(parts[1])
+	return n
 }
 
 // region FUNC_Dialer_Collect [DOMAIN(8): Observability; CONCEPT(8): Collect; TECH(8): ssh]
@@ -174,6 +257,9 @@ func (d *Dialer) Collect(ctx context.Context, vmID int64) (map[string]float64, e
 		"load5":         s.Load5,
 		"load15":        s.Load15,
 		"cpu_count":     float64(s.CPUCount),
+		"cpu_pct":       s.CPUPct,
+		"tcp_conns":     float64(s.TCPConns),
+		"proc_count":    float64(s.ProcCount),
 	}, nil
 }
 func toGB(val, unit string) float64 {
