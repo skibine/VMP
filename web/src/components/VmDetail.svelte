@@ -588,11 +588,15 @@
       {#if vhosts.err}
         <div class="text-xs font-mono text-neon-red">{vhosts.err}{#if vhosts.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
       {:else if vhosts.data}
-        <div class="text-xs font-mono text-hud-dim">server: {vhosts.data.server}</div>
+        <div class="text-xs font-mono text-hud-dim">server: {vhosts.data.server}{#if vhosts.data.listening?.length}<span class="ml-2">listening: {vhosts.data.listening.join(', ')}</span>{/if}{#if !vhosts.data.root}<span class="ml-2 text-neon-amber">(non-root)</span>{/if}</div>
         {#if vhosts.data.sites?.length}
           <div class="flex flex-wrap gap-1">{#each vhosts.data.sites as s}<span class="text-emerald-200/80 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono">{s.name}{#if s.port}<span class="text-hud-dim">:{s.port}</span>{/if}</span>{/each}</div>
+        {:else if vhosts.data.server === 'unknown'}
+          <div class="hud-label text-neon-amber">web ports open (:80/:443) but SSH user is non-root — can't read the server config. Use a root/sudo login to inspect vhosts.</div>
+        {:else if vhosts.data.server !== 'none'}
+          <div class="hud-label text-neon-amber">{vhosts.data.server} serves :80/:443 but no readable vhost config (container / non-standard path)</div>
         {:else}
-          <div class="hud-label text-hud-dim">no web server / no vhosts</div>
+          <div class="hud-label text-hud-dim">no web server on :80/:443</div>
         {/if}
       {/if}
     </section>
