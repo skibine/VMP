@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(34, 211, 238, 0.05), transparent),
+    radial-gradient(1000px 500px at -10% 110%, rgba(52, 211, 153, 0.06), transparent),
+    #070a08;
+}
+
+/* region HUD [DOMAIN(6): Design; CONCEPT(7]: HUD; TECH(7]: tailwind] */
+@layer components {
+  .hud-panel {
+    @apply bg-hud-panel/80 border border-hud-line rounded-md backdrop-blur-sm;
+  }
+  .hud-label {
+    @apply text-[10px] uppercase tracking-[0.2em] text-hud-dim font-mono;
+  }
+  .hud-input {
+    @apply w-full bg-hud-panel2 border border-hud-line rounded px-3 py-2 text-sm text-emerald-100 placeholder-hud-dim focus:outline-none focus:border-neon-green/60;
+  }
+  .hud-btn {
+    @apply px-3 py-2 rounded border border-hud-line text-xs font-mono uppercase tracking-wider text-emerald-200/80 hover:border-neon-green/60 hover:text-neon-green transition-colors;
+  }
+  .hud-btn-primary {
+    @apply bg-neon-green/10 border-neon-green/40 text-neon-green;
+  }
+  .hud-grid {
+    background-image:
+      linear-gradient(rgba(28, 42, 32, 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(28, 42, 32, 0.35) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .scan {
+    position: relative;
+    overflow: hidden;
+  }
+  .scan::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent, rgba(52, 211, 153, 0.04), transparent);
+    animation: scan 6s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes scan {
+    0% {
+      transform: translateY(-100%);
+    }
+    100% {
+      transform: translateY(100%);
+    }
+  }
+}

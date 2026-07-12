@@ -1,0 +1,32 @@
+# VM Pulse configuration example. Copy to `config.yaml` and adjust.
+# Generated secrets (master key) are added by the installer; NEVER commit a real config.yaml.
+
+# Deployment mode.
+#   local  = binds localhost (soft security: no mandatory 2FA, long lock timeouts).
+#   server = binds 0.0.0.0  (strict security: TLS, 2FA for owner, rate-limit, step-up).
+mode: local
+
+# Listen address:port. local -> 127.0.0.1, server -> 0.0.0.0.
+listen: "127.0.0.1:8443"
+
+# SQLite database file path (relative to the working directory).
+db_path: "data/vmpulse.sqlite"
+
+# Log verbosity: debug | info | warn | error.
+log_level: "info"
+
+# AI copilot (OpenAI-compatible API). Leave api_key empty to disable the chat endpoint.
+ai:
+  api_url: "https://api.openai.com/v1"
+  api_key: ""
+  model: "gpt-4o-mini"
+
+# First-run bootstrap: set both once to create the initial owner, then REMOVE from config.
+auth:
+  bootstrap_admin_username: ""
+  bootstrap_admin_password: ""
+
+# Master passphrase for encrypting secrets at rest (channel tokens, later SSH creds).
+# Empty = vault disabled (secrets stored plaintext). Keep config.yaml at 0600. NEVER commit.
+vault:
+  passphrase: ""

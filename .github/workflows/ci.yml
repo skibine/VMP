@@ -1,0 +1,43 @@
+# region CI [DOMAIN(7): CI; CONCEPT(7): Pipeline; TECH(8): GitHubActions]
+# @purpose Lint + test on every push/PR. CGO-free build (modernc sqlite) keeps it portable.
+# GREP_SUMMARY: ci, github actions, go, test, vet, build
+# STRUCTURE: ▶ checkout → ○ setup-go → ⚡ go vet → ⊕ go test → ∑ go build
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+      - name: Build SPA
+        working-directory: web
+        run: |
+          npm install
+          npm run build
+      - name: Download deps
+        run: go mod download
+      - name: Format check
+        run: |
+          out=$(gofmt -l internal cmd)
+          if [ -n "$out" ]; then echo "::error::gofmt issues:"; echo "$out"; exit 1; fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -v
+      - name: Build
+        run: go build ./...

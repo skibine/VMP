@@ -1,0 +1,40 @@
+# Binaries
+/vmpulse
+/vmpulse.exe
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+go.work
+go.work.sum
+
+# SQLite runtime files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Local instance data (generated at install, never committed)
+/config.yaml
+/data/
+/logs/
+*.log
+
+# Frontend build
+/web/node_modules/
+/web/dist/
+/internal/web/dist/
+/web/.svelte-kit/
+
+# Test artifacts
+tests/.test_counter.json
+coverage.out
+
+# Editor/OS
+.idea/
+.vscode/
+.DS_Store
