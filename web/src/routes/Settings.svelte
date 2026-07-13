@@ -138,6 +138,9 @@
       <button class="hud-btn hud-btn-primary" on:click={startSetup} disabled={twofaBusy}>{twofaBusy ? '…' : 'enable 2FA'}</button>
     {:else}
       <div class="space-y-3">
+        <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5">
+          ⚠ store your backup codes safely. Losing your authenticator <b>and</b> backup codes locks you out — only an operator with box access can reset (`vmpulse -reset-2fa &lt;username&gt;`).
+        </div>
         <p class="text-xs text-hud-dim">1. scan with your authenticator app, or enter the secret manually.</p>
         <div class="flex gap-3 items-start">
           {#if setup.qr_data_url}<img src={setup.qr_data_url} alt="2FA QR" class="w-36 h-36 bg-white p-1 rounded" />{/if}
@@ -158,7 +161,7 @@
       <div class="border border-neon-amber/40 rounded p-3 bg-neon-amber/5 space-y-2">
         <div class="hud-label text-neon-amber">backup codes — store these safely (shown once)</div>
         <div class="font-mono text-xs grid grid-cols-2 gap-1">{#each backupCodes as c}<span class="text-emerald-200">{c}</span>{/each}</div>
-        <p class="text-[11px] text-hud-dim">each works as a one-time 2FA code if you lose your device.</p>
+        <p class="text-[11px] text-hud-dim">each works as a one-time 2FA code if you lose your device. lose these too → operator reset on the box (<span class="font-mono">vmpulse -reset-2fa</span>).</p>
       </div>
     {/if}
     {#if twofaMsg}<div class="text-xs text-neon-green font-mono">{twofaMsg}</div>{/if}

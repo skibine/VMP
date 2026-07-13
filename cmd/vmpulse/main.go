@@ -42,6 +42,7 @@ import (
 // endregion FUNC_main
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config.yaml")
+	reset2FA := flag.String("reset-2fa", "", "BREAK-GLASS: disable 2FA for the given username and exit (run on the box if locked out)")
 	flag.Parse()
 
 	logger := logging.Setup(parseLevel("info"), os.Stdout)
@@ -67,6 +68,27 @@ func main() {
 	}()
 
 	armVault(context.Background(), s, cfg, logger)
+
+	// BREAK-GLASS recovery: a user who lost their authenticator AND backup codes can be unblocked by
+	// an operator with filesystem access: `vmpulse -config ... -reset-2fa <username>`. This disables
+	// 2FA for that user and exits — the operator must then log in with the password and re-enroll.
+	if *reset2FA != "" {
+		u, err := s.GetUserByUsername(context.Background(), *reset2FA)
+		if err != nil {
+			logging.LDD(logger, 10, "reset-2fa", "USER_NOT_FOUND", *reset2FA)
+			os.Exit(1)
+		}
+		if err := s.DisableTOTP(context.Background(), u.ID); err != nil {
+			logging.LDD(logger, 10, "reset-2fa", "FAIL", err.Error())
+			os.Exit(1)
+		}
+		_ = audit.Append(s.DB, logger, audit.Entry{
+			Plane: audit.PlaneB, UserID: u.ID, Action: "auth.2fa_breakglass_reset",
+			Detail: "username=" + *reset2FA, Success: true,
+		})
+		logging.LDD(logger, 9, "reset-2fa", "DONE", "2FA disabled for "+*reset2FA+" — log in with the password now")
+		return
+	}
 
 	if err := audit.Append(s.DB, logger, audit.Entry{
 		Plane:   audit.PlaneA,
