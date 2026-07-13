@@ -52,6 +52,7 @@ export const api = {
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   vmVHosts: (id) => req('/api/vms/' + id + '/vhosts'),
   vmInventory: (id) => req('/api/vms/' + id + '/inventory'),
+  refreshInventory: (id) => req('/api/vms/' + id + '/inventory/refresh', { method: 'POST' }),
   listAIActions: (status) => req('/api/ai/actions' + (status ? '?status=' + status : '')),
   approveAIAction: (id) => req('/api/ai/actions/' + id + '/approve', { method: 'POST' }),
   rejectAIAction: (id) => req('/api/ai/actions/' + id + '/reject', { method: 'POST' }),

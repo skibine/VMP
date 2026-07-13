@@ -61,7 +61,13 @@
     const text = input.trim()
     if (!text || busy) return
     input = ''
-    messages = [...messages, { role: 'user', text }]
+    await askAI(text, { role: 'user', text })
+  }
+
+  // askAI sends one turn to the assistant. `userMsg` is pushed to the transcript first (the user's
+  // text, or a synthetic system-injected note). Used by send() and by the post-approve continuation.
+  async function askAI(text, userMsg) {
+    messages = [...messages, userMsg]
     persist()
     busy = true
     try {
@@ -84,12 +90,25 @@
 
   async function approve(a) {
     actionBusy = { ...actionBusy, [a.id]: true }
+    let res
     try {
-      const res = await api.approveAIAction(a.id)
+      res = await api.approveAIAction(a.id)
       a._result = res
       a._done = true
-    } catch (e) { a._result = { status: 'error', error: e.message }; a._done = true }
-    finally { actionBusy = { ...actionBusy, [a.id]: false }; setTimeout(refreshPending, 500) }
+    } catch (e) {
+      a._result = { status: 'error', error: e.message }
+      a._done = true
+    } finally {
+      actionBusy = { ...actionBusy, [a.id]: false }
+      setTimeout(refreshPending, 500)
+    }
+    // Close the loop: feed the execution result back to the assistant so it reports automatically
+    // (no need for the user to ask "what happened?").
+    if (res) {
+      const vm = pending.find((p) => p.id === a.id) || a
+      const note = `[action executed] action #${a.id} "${a.command}" on VM ${a.vm_id} was approved and run.\nstatus: ${res.status}\noutput:\n${res.output || '(none)'}\n${res.error ? 'error: ' + res.error : ''}\nReport the result to the user concisely.`
+      await askAI(note, { role: 'user', text: note, synthetic: true })
+    }
   }
 
   async function reject(a) {
@@ -130,12 +149,14 @@
     {/if}
     {#each messages as m}
       <div class="space-y-1">
-        <div class="hud-label">{m.role === 'user' ? '> you' : '< vmpilot'}</div>
+        <div class="hud-label">{m.synthetic ? '⟳ action result' : m.role === 'user' ? '> you' : '< vmpilot'}</div>
         {#if m.text}
           <div
-            class="text-sm whitespace-pre-wrap {m.role === 'user'
-              ? 'text-emerald-100'
-              : 'text-neon-green/90'}"
+            class="text-sm whitespace-pre-wrap {m.synthetic
+              ? 'text-hud-dim italic border-l-2 border-hud-line pl-2'
+              : m.role === 'user'
+                ? 'text-emerald-100'
+                : 'text-neon-green/90'}"
           >
             {m.text}
           </div>

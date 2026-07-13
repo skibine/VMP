@@ -41,6 +41,9 @@
   // every detail open) — fetched only when the "packages" details block is expanded.
   let packagesList = null
 
+  // Manual refresh of the SSH inventory profile.
+  let profileBusy = false
+
   // Recent log errors (journalctl) — Plane B one-shot over SSH.
   let errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
 
@@ -137,6 +140,23 @@
       packagesList = d.packages_list || []
     } catch (e) {
       packagesList = []
+    }
+  }
+
+  async function refreshProfile() {
+    profileBusy = true
+    try {
+      const d = await api.refreshInventory(vmId)
+      if (d.error) {
+        editMsg = d.detail || d.error
+      } else if (d.inventory) {
+        system = d.inventory
+        packagesList = null // force lazy reload on next expand
+      }
+    } catch (e) {
+      editMsg = e.message
+    } finally {
+      profileBusy = false
     }
   }
 
@@ -535,7 +555,10 @@
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
       <section class="hud-panel p-3 space-y-2">
-        <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
+        <div class="flex items-center gap-2">
+          <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
+          <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : '↻ refresh'}</button>
+        </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
           <div class="truncate"><span class="hud-label text-hud-dim">os</span> {system.os || '—'}</div>
           <div class="truncate"><span class="hud-label text-hud-dim">kernel</span> {system.kernel || '—'} {system.arch}</div>

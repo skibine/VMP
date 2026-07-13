@@ -92,8 +92,11 @@ func TestAgent_BoundedLoop(t *testing.T) {
 		Run:  func(context.Context, map[string]any) (string, error) { return "[]", nil },
 	}), Model: "m", MaxIters: 2, Logger: logger}
 
-	_, err := ag.Ask(context.Background(), "loop", nil)
-	if err == nil {
-		t.Fatal("expected max-iters error")
+	ans, err := ag.Ask(context.Background(), "loop", nil)
+	if err != nil {
+		t.Fatalf("max-iters should be a graceful reply, not an error: %v", err)
+	}
+	if !strings.Contains(ans.Reply, "step limit") {
+		t.Fatalf("expected step-limit reply, got: %s", ans.Reply)
 	}
 }

@@ -83,6 +83,7 @@
           on:click={() => dispatch('select', vm.id)}
         >
           <span class="h-2 w-2 rounded-full bg-{color(st)} shrink-0"></span>
+          <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
           <span class="min-w-0">
             <span class="block font-mono text-sm text-emerald-100 truncate">{vm.name}</span>
             <span class="block text-[10px] text-hud-dim font-mono truncate">{vm.ip || vm.hostname}</span>

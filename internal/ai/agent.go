@@ -39,7 +39,7 @@ type Agent struct {
 
 func (a *Agent) maxIters() int {
 	if a.MaxIters <= 0 {
-		return 6
+		return 12
 	}
 	return a.MaxIters
 }
@@ -94,7 +94,23 @@ func (a *Agent) Ask(ctx context.Context, message string, history []Message) (Ask
 		}
 	}
 	logging.LDD(a.Logger, 9, "Ask", "MAX_ITERS", "loop exceeded")
-	return reply, fmt.Errorf("ai: exceeded %d iterations without a final answer", a.maxIters())
+	// Graceful stop instead of a hard error: summarize what was attempted so the user sees progress,
+	// not a cryptic 502. The trace carries the tool calls already made.
+	steps := make([]string, 0, len(reply.Trace))
+	for _, t := range reply.Trace {
+		steps = append(steps, t.Tool)
+	}
+	reply.Reply = fmt.Sprintf("I hit my step limit (%d) before finishing. Steps attempted: %s. "+
+		"Please rephrase or ask me to continue.", a.maxIters(), joinOrNone(steps))
+	return reply, nil
+}
+
+// joinOrNone renders a short tool list (or "none").
+func joinOrNone(steps []string) string {
+	if len(steps) == 0 {
+		return "none"
+	}
+	return strings.Join(steps, ", ")
 }
 
 // AskReply is the result of one turn: the assistant's text + a trace of tool calls it made.

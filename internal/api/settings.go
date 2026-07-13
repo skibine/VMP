@@ -32,6 +32,7 @@ func registerSettings(mux *http.ServeMux, a *crudAPI) {
 
 	mux.HandleFunc("GET /api/vms/{id}/credentials", a.getVMCreds)
 	mux.HandleFunc("GET /api/vms/{id}/inventory", a.vmInventory)
+	mux.HandleFunc("POST /api/vms/{id}/inventory/refresh", a.refreshInventory)
 	mux.HandleFunc("PUT /api/vms/{id}/credentials", a.setVMCreds)
 	mux.HandleFunc("DELETE /api/vms/{id}/credentials", a.deleteVMCreds)
 	mux.HandleFunc("PUT /api/vms/{id}/ai-access", a.setAIAccess)
@@ -112,6 +113,30 @@ func (a *crudAPI) getVMCreds(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// refreshInventory re-runs the SSH inventory probe and persists it (manual refresh of the
+// "system // profile" block). Plane B: needs SSH credentials.
+func (a *crudAPI) refreshInventory(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	client, _, derr := a.dialer.Dial(r.Context(), id)
+	if derr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": classifyDialKind(derr), "detail": derr.Error()})
+		return
+	}
+	defer client.Close()
+	inv, err := a.dialer.Inventory(r.Context(), client)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "other", "detail": err.Error()})
+		return
+	}
+	if blob, err := json.Marshal(inv); err == nil {
+		_ = a.st.SetVMInventory(r.Context(), id, string(blob))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "inventory": inv})
 }
 
 // vmInventory returns the FULL persisted SSH inventory (incl. packages_list) for the lazy-loaded

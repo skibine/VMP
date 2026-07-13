@@ -29,13 +29,16 @@ func (s *Store) CreateVM(ctx context.Context, v VM) (int64, error) {
 	if err := v.Validate(); err != nil {
 		return 0, err
 	}
+	// Assign the next stable ordinal (max+1). Never renumbered on delete (gaps are intentional).
+	var maxNo int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_no),0) FROM vms`).Scan(&maxNo)
 	res, err := s.DB.ExecContext(ctx, `
 INSERT INTO vms
-(name, hostname, ip, port_ssh, ssh_user, auth_type, provider, location_country, location_city,
+(name, display_no, hostname, ip, port_ssh, ssh_user, auth_type, provider, location_country, location_city,
  tags, group_id, notes, cost_monthly, currency, owner_user_id, agent_enabled, agent_port,
  prometheus_url, record_ssh_sessions, metrics_enabled, ai_enabled)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		v.Name, maxNo+1, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
 		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled))
@@ -44,7 +47,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		return 0, fmt.Errorf("CreateVM: %w", err)
 	}
 	id, _ := res.LastInsertId()
-	logging.LDD(s.logger, 8, "CreateVM", "CREATED", fmt.Sprintf("id=%s name=%s", fmtID(id), v.Name))
+	logging.LDD(s.logger, 8, "CreateVM", "CREATED", fmt.Sprintf("id=%s no=%d name=%s", fmtID(id), maxNo+1, v.Name))
 	return id, nil
 }
 
@@ -69,9 +72,9 @@ func (s *Store) GetVM(ctx context.Context, id int64) (VM, error) {
 // @complexity 4
 // endregion FUNC_ListVMs
 func (s *Store) ListVMs(ctx context.Context, includeArchived bool) ([]VM, error) {
-	q := vmSelectCols() + ` ORDER BY id ASC`
+	q := vmSelectCols() + ` ORDER BY display_no ASC`
 	if !includeArchived {
-		q = vmSelectCols() + ` WHERE archived_at IS NULL ORDER BY id ASC`
+		q = vmSelectCols() + ` WHERE archived_at IS NULL ORDER BY display_no ASC`
 	}
 	rows, err := s.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -175,7 +178,7 @@ func (s *Store) DeleteVM(ctx context.Context, id int64) error {
 
 // vmSelectCols returns the SELECT preamble shared by Get/List.
 func vmSelectCols() string {
-	return `SELECT id, name, hostname, ip, port_ssh, ssh_user, auth_type, provider,
+	return `SELECT id, name, display_no, hostname, ip, port_ssh, ssh_user, auth_type, provider,
  location_country, location_city, tags, group_id, notes, cost_monthly, currency,
  owner_user_id, agent_enabled, agent_port, prometheus_url, record_ssh_sessions, metrics_enabled,
  ai_enabled, created_at, updated_at, archived_at FROM vms`
@@ -190,7 +193,7 @@ func scanVM(sc scanner) (VM, error) {
 	var archived sql.NullString
 	var agentEnabled, recordSSH, metricsEnabled, aiEnabled int
 	err := sc.Scan(
-		&v.ID, &v.Name, &v.Hostname, &v.IP, &v.PortSSH, &v.SSHUser, &v.AuthType, &v.Provider,
+		&v.ID, &v.Name, &v.DisplayNo, &v.Hostname, &v.IP, &v.PortSSH, &v.SSHUser, &v.AuthType, &v.Provider,
 		&v.LocationCountry, &v.LocationCity, &tags, &groupID, &v.Notes, &cost, &v.Currency,
 		&ownerID, &agentEnabled, &agentPort, &v.PrometheusURL, &recordSSH, &metricsEnabled,
 		&aiEnabled, &v.CreatedAt, &v.UpdatedAt, &archived)

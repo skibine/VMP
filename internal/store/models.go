@@ -41,6 +41,7 @@ func (e ValidationError) Error() string { return e.Field + ": " + e.Reason }
 type VM struct {
 	ID                int64    `json:"id"`
 	Name              string   `json:"name"`
+	DisplayNo         int      `json:"display_no"` // stable ordinal assigned at creation; never renumbered
 	Hostname          string   `json:"hostname"`
 	IP                string   `json:"ip"`
 	PortSSH           int      `json:"port_ssh"`

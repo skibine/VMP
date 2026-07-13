@@ -174,6 +174,37 @@ func StoreTools(s *store.Store) []Tool {
 			},
 		},
 		{
+			Name:        "get_vm_inventory",
+			Description: "Get the scanned system profile for a VM (OS, listening ports, docker containers, package/services counts, running services) — the inventory gathered from SSH. Only if ai access is granted.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"vm_id": map[string]any{"type": "integer"}},
+				"required":   []string{"vm_id"},
+			},
+			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				id, ok := intArg(args, "vm_id")
+				if !ok {
+					return "", fmt.Errorf("vm_id required")
+				}
+				vm, err := s.GetVM(ctx, id)
+				if err != nil {
+					return jsonStr(map[string]any{"error": "vm not found", "vm_id": id})
+				}
+				if !vm.AIEnabled {
+					return jsonStr(map[string]any{"error": "ai access disabled for this vm", "vm_id": id})
+				}
+				creds, has, err := s.GetVMCredentials(ctx, id)
+				if err != nil || !has || creds.Inventory == "" {
+					return jsonStr(map[string]any{"vm_id": id, "inventory": nil, "note": "no SSH inventory scanned yet"})
+				}
+				var inv any
+				if err := json.Unmarshal([]byte(creds.Inventory), &inv); err != nil {
+					return jsonStr(map[string]any{"vm_id": id, "inventory": nil, "note": "inventory parse error"})
+				}
+				return jsonStr(map[string]any{"vm_id": id, "inventory": inv})
+			},
+		},
+		{
 			Name:        "list_alerts",
 			Description: "List recently fired alerts (newest first), only for VMs the operator granted the assistant access to (ai_enabled).",
 			Parameters: map[string]any{
