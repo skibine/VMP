@@ -1,5 +1,6 @@
 <script>
   import { api } from '../lib/api.js'
+  import { onMount, onDestroy } from 'svelte'
   import ArtifactRenderer from './ArtifactRenderer.svelte'
 
   // region ChatPanel [DOMAIN(8): AI; CONCEPT(8]: Copilot; TECH(6]: svelte]
@@ -8,6 +9,37 @@
   let input = ''
   let busy = false
   let messages = [] // {role, text, artifact}
+
+  // Pending AI actions (Plane B approval). Polled so an out-of-band proposal surfaces here.
+  let pending = []
+  let pollTimer = null
+  let actionBusy = {} // id -> true while approving/rejecting
+
+  onMount(() => { refreshPending(); pollTimer = setInterval(refreshPending, 4000) })
+  onDestroy(() => { if (pollTimer) clearInterval(pollTimer) })
+
+  async function refreshPending() {
+    try {
+      const res = await api.listAIActions('pending')
+      pending = res.actions || []
+    } catch (_) { /* ignore — chat still works */ }
+  }
+
+  async function approve(a) {
+    actionBusy = { ...actionBusy, [a.id]: true }
+    try {
+      const res = await api.approveAIAction(a.id)
+      a._result = res
+      a._done = true
+    } catch (e) { a._result = { status: 'error', error: e.message }; a._done = true }
+    finally { actionBusy = { ...actionBusy, [a.id]: false }; setTimeout(refreshPending, 500) }
+  }
+
+  async function reject(a) {
+    actionBusy = { ...actionBusy, [a.id]: true }
+    try { await api.rejectAIAction(a.id); pending = pending.filter((x) => x.id !== a.id) }
+    catch (_) {} finally { actionBusy = { ...actionBusy, [a.id]: false } }
+  }
 
   // ```vmpulse-artifact\n{...json...}```  -> {text, artifact}
   function parseReply(reply) {
@@ -89,6 +121,25 @@
     {/each}
     {#if busy}
       <div class="hud-label animate-pulse">vmpilot thinking…</div>
+    {/if}
+    {#if pending.length}
+      <div class="space-y-2 pt-2">
+        <div class="hud-label text-neon-amber">// pending actions ({pending.length}) — approve to execute</div>
+        {#each pending as a (a.id)}
+          <div class="hud-panel p-2 space-y-1 border-neon-amber/40">
+            <div class="text-xs font-mono break-all"><span class="hud-label text-hud-dim">vm {a.vm_id}:</span> <span class="text-emerald-200/90">{a.command}</span></div>
+            {#if a.reason}<div class="text-[11px] font-mono text-hud-dim">why: {a.reason}</div>{/if}
+            {#if a._done && a._result}
+              <div class="text-[11px] font-mono whitespace-pre-wrap {a._result.status === 'done' ? 'text-neon-green' : 'text-neon-red'}">{a._result.status === 'done' ? '✓ ' : '✗ '}{a._result.output || a._result.error || ''}</div>
+            {:else}
+              <div class="flex items-center gap-2">
+                <button class="hud-btn hud-btn-primary !py-0.5 !text-xs" on:click={() => approve(a)} disabled={actionBusy[a.id]}>{actionBusy[a.id] ? '…' : '✓ approve'}</button>
+                <button class="hud-btn !py-0.5 !text-xs" on:click={() => reject(a)} disabled={actionBusy[a.id]}>✕ reject</button>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
     {/if}
   </div>
 

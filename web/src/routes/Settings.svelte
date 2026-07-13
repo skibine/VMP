@@ -4,7 +4,7 @@
 
   // region Settings [DOMAIN(9): UI; CONCEPT(7]: GlobalSettings; TECH(6]: svelte]
   // Global settings only (AI provider). Per-VM credentials live in the VM detail pane now.
-  let ai = { api_url: '', model: '', has_key: false }
+  let ai = { api_url: '', model: '', has_key: false, auto_approve: false }
   let aiKey = '' // leave empty to keep existing
   let aiMsg = ''
   let aiOk = false
@@ -23,7 +23,7 @@
     aiBusy = true
     aiMsg = ''
     try {
-      await api.updateAISettings({ api_url: ai.api_url, api_key: aiKey, model: ai.model })
+      await api.updateAISettings({ api_url: ai.api_url, api_key: aiKey, model: ai.model, auto_approve: ai.auto_approve })
       aiKey = ''
       await loadAI()
       aiMsg = 'saved — assistant reloaded, no restart needed'
@@ -56,6 +56,11 @@
         <input class="hud-input" type="password" bind:value={aiKey} placeholder={ai.has_key ? '••••••' : 'sk-...'} />
       </label>
     </div>
+    <label class="flex items-center gap-2 cursor-pointer select-none pt-1">
+      <input type="checkbox" class="accent-neon-amber" bind:checked={ai.auto_approve} />
+      <span class="hud-label {ai.auto_approve ? 'text-neon-amber' : ''}">auto-approve AI actions</span>
+      <span class="text-[11px] text-hud-dim">// off (default): VMPilot proposes, you approve each command. on: proposed commands run immediately.</span>
+    </label>
     <div class="flex items-center gap-3">
       <button class="hud-btn hud-btn-primary" on:click={saveAI} disabled={aiBusy}>
         {aiBusy ? 'saving…' : aiMsg && aiOk ? 'saved ✓' : 'save'}

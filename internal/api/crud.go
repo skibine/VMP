@@ -78,6 +78,8 @@ func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
 
 	// On-demand diagnostics + run-now.
 	registerDiagnostics(mux, a)
+	// AI action approval (Plane B; execute approved proposals over SSH).
+	registerAIActions(mux, a)
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────────

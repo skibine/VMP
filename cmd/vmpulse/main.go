@@ -101,7 +101,9 @@ func main() {
 	// AI copilot: migrate config.AI into the settings store once (if present), then wire a
 	// runtime SettingsProvider so AI is configurable from the Settings UI without restart.
 	seedAI(ctx, s, cfg, logger)
-	aiRegistry := ai.NewRegistry(ai.StoreTools(s)...)
+	// AI executor wraps the SSH dialer so approved (or auto-approved) commands can run on VMs.
+	sshDialer := ssh.New(s, logger)
+	aiRegistry := ai.NewRegistry(append(ai.StoreTools(s), ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
 	server.WithAgent(&ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger})
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
@@ -110,7 +112,7 @@ func main() {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Minute // default cadence (60s was too noisy for small fleets)
 	}
-	go metrics.New(s, ssh.New(s, logger), logger).WithInterval(pollInterval).Run(ctx)
+	go metrics.New(s, sshDialer, logger).WithInterval(pollInterval).Run(ctx)
 
 	if err := server.Serve(ctx); err != nil {
 		logging.LDD(logger, 10, "main", "SERVE_FAIL", err.Error())
@@ -121,6 +123,23 @@ func main() {
 		Plane: audit.PlaneA, Action: "service.stop", Success: true,
 	})
 	logging.LDD(logger, 9, "main", "STOP", "vmpulse stopped")
+}
+
+// sshActionExec implements ai.ActionExecutor: runs an approved command on a VM over SSH.
+type sshActionExec struct {
+	dialer *ssh.Dialer
+	st     *store.Store
+}
+
+func (e *sshActionExec) Execute(ctx context.Context, vmID int64, command string) (string, error) {
+	client, _, derr := e.dialer.Dial(ctx, vmID)
+	if derr != nil {
+		return "", derr
+	}
+	defer client.Close()
+	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return e.dialer.RunCommand(rctx, client, command)
 }
 
 // region FUNC_parseLevel [DOMAIN(7): Config; CONCEPT(5): LogLevel; TECH(4): slog]

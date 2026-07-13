@@ -46,17 +46,19 @@ func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"api_url": cfg.APIURL,
-		"model":   cfg.Model,
-		"has_key": cfg.APIKey != "",
+		"api_url":      cfg.APIURL,
+		"model":        cfg.Model,
+		"has_key":      cfg.APIKey != "",
+		"auto_approve": a.st.IsAIAutoApprove(r.Context()),
 	})
 }
 
 func (a *crudAPI) updateAISettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		APIURL string `json:"api_url"`
-		APIKey string `json:"api_key"`
-		Model  string `json:"model"`
+		APIURL      string `json:"api_url"`
+		APIKey      string `json:"api_key"`
+		Model       string `json:"model"`
+		AutoApprove *bool  `json:"auto_approve"` // pointer so false is distinguishable from omitted
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -70,6 +72,13 @@ func (a *crudAPI) updateAISettings(w http.ResponseWriter, r *http.Request) {
 	if err := a.st.SetAIConfig(r.Context(), store.AIConfig{APIURL: body.APIURL, APIKey: key, Model: body.Model}); err != nil {
 		a.writeErr(w, "updateAISettings", err)
 		return
+	}
+	if body.AutoApprove != nil {
+		val := "false"
+		if *body.AutoApprove {
+			val = "true"
+		}
+		_ = a.st.SetSetting(r.Context(), store.SettingAIAutoApprove, val, false)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
