@@ -53,5 +53,5 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "ai: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"reply": reply})
+	writeJSON(w, http.StatusOK, map[string]any{"reply": reply.Reply, "trace": reply.Trace})
 }

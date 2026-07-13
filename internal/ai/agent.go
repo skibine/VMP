@@ -54,24 +54,29 @@ func (a *Agent) systemPrompt() string {
 }
 
 // region FUNC_Ask [DOMAIN(9): AI; CONCEPT(8): Converse; TECH(7): loop]
-// @purpose Run one user turn to completion, executing tool calls along the way.
+// @purpose Run one user turn to completion, executing tool calls along the way. Returns the final
+//
+//	reply plus a trace of the tool calls made (so the UI can show what the assistant did).
+//
 // @complexity 6
 // endregion FUNC_Ask
-func (a *Agent) Ask(ctx context.Context, message string, history []Message) (string, error) {
+func (a *Agent) Ask(ctx context.Context, message string, history []Message) (AskReply, error) {
 	msgs := []Message{{Role: "system", Content: a.systemPrompt()}}
 	msgs = append(msgs, history...)
 	msgs = append(msgs, Message{Role: "user", Content: message})
 
+	reply := AskReply{Trace: []TraceStep{}}
 	logging.LDD(a.Logger, 8, "Ask", "USER", truncate(message, 120))
 	for i := 0; i < a.maxIters(); i++ {
 		resp, err := a.Provider.Chat(ctx, ChatRequest{Model: a.Model, Messages: msgs, Tools: a.Tools.Tools()})
 		if err != nil {
 			logging.LDD(a.Logger, 10, "Ask", "CHAT_FAIL", err.Error())
-			return "", err
+			return reply, err
 		}
 		if len(resp.ToolCalls) == 0 {
 			logging.LDD(a.Logger, 9, "Ask", "ANSWER", truncate(resp.Content, 160))
-			return resp.Content, nil
+			reply.Reply = resp.Content
+			return reply, nil
 		}
 		// Record the assistant's tool invocations, then execute and append results.
 		msgs = append(msgs, Message{Role: "assistant", ToolCalls: resp.ToolCalls})
@@ -83,10 +88,26 @@ func (a *Agent) Ask(ctx context.Context, message string, history []Message) (str
 			}
 			logging.LDD(a.Logger, 8, "Ask", "TOOL", tc.Function.Name+" -> "+truncate(result, 120))
 			msgs = append(msgs, Message{Role: "tool", ToolCallID: tc.ID, Content: result})
+			reply.Trace = append(reply.Trace, TraceStep{
+				Tool: tc.Function.Name, Args: truncate(tc.Function.Arguments, 160), Result: truncate(result, 200),
+			})
 		}
 	}
 	logging.LDD(a.Logger, 9, "Ask", "MAX_ITERS", "loop exceeded")
-	return "", fmt.Errorf("ai: exceeded %d iterations without a final answer", a.maxIters())
+	return reply, fmt.Errorf("ai: exceeded %d iterations without a final answer", a.maxIters())
+}
+
+// AskReply is the result of one turn: the assistant's text + a trace of tool calls it made.
+type AskReply struct {
+	Reply string      `json:"reply"`
+	Trace []TraceStep `json:"trace"`
+}
+
+// TraceStep is one tool invocation the assistant performed during a turn.
+type TraceStep struct {
+	Tool   string `json:"tool"`
+	Args   string `json:"args"`
+	Result string `json:"result"`
 }
 
 // parseArgs unmarshals the tool arguments JSON string; tolerant of empty/invalid input.

@@ -29,9 +29,9 @@
   }
 </script>
 
-<div class="min-h-full flex flex-col">
+<div class="h-full flex flex-col overflow-hidden">
   <!-- Top bar -->
-  <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4">
+  <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0">
     <div class="hud-label">// VM&nbsp;PULSE</div>
     <div class="flex items-center gap-1">
       <button class="hud-btn {view === 'fleet' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'fleet')}>fleet</button>
@@ -46,34 +46,34 @@
 
   {#if view === 'fleet'}
     <!-- master-detail + chat -->
-    <main class="flex-1 grid grid-cols-[220px_1fr_360px] min-h-0">
-      <section class="hud-panel border-l-0 border-y-0 min-h-0">
+    <main class="flex-1 grid grid-cols-[220px_1fr_360px] min-h-0 overflow-hidden">
+      <section class="hud-panel border-l-0 border-y-0 min-h-0 overflow-auto">
         <VmList {selectedId} on:select={onSelect} on:changed={onVmChanged} key={listKey} />
       </section>
       <section class="overflow-auto hud-grid min-h-0">
         <VmDetail vmId={selectedId} on:changed={onVmChanged} on:deleted={onVmDeleted} />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0">
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
         <ChatPanel />
       </aside>
     </main>
   {:else if view === 'domains'}
     <!-- domains + chat -->
-    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0">
+    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0 overflow-hidden">
       <section class="overflow-auto hud-grid min-h-0">
         <Domains />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0">
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
         <ChatPanel />
       </aside>
     </main>
   {:else}
     <!-- settings + chat -->
-    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0">
+    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0 overflow-hidden">
       <section class="overflow-auto hud-grid p-4">
         <Settings />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0">
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
         <ChatPanel />
       </aside>
     </main>

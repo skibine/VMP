@@ -62,8 +62,8 @@ func TestAgent_ToolCallThenAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
-	if !strings.Contains(ans, "web1") {
-		t.Fatalf("answer should mention web1, got: %s", ans)
+	if !strings.Contains(ans.Reply, "web1") {
+		t.Fatalf("answer should mention web1, got: %s", ans.Reply)
 	}
 	if prov.calls != 2 {
 		t.Fatalf("provider should be called twice, got %d", prov.calls)
