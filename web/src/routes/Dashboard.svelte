@@ -27,7 +27,34 @@
     await api.logout()
     doLogout()
   }
+
+  // Resizable chat column: drag the handle between the info pane and the chat to widen/narrow it.
+  // Persisted to localStorage so the operator's preferred width survives reloads.
+  let chatW = Number(localStorage.getItem('vmp_chat_w') || 360)
+  const CHAT_MIN = 300
+  const CHAT_MAX = 760
+  let dragging = false
+
+  function startDrag(e) {
+    e.preventDefault()
+    dragging = true
+  }
+  function onMove(e) {
+    if (!dragging) return
+    // chat is on the right edge -> its width = viewport right minus pointer X (clamped).
+    const w = Math.min(CHAT_MAX, Math.max(CHAT_MIN, window.innerWidth - e.clientX))
+    chatW = w
+    localStorage.setItem('vmp_chat_w', String(w))
+  }
+  function stopDrag() {
+    if (dragging) {
+      dragging = false
+      localStorage.setItem('vmp_chat_w', String(chatW))
+    }
+  }
 </script>
+
+<svelte:window on:mousemove={onMove} on:mouseup={stopDrag} />
 
 <div class="h-full flex flex-col overflow-hidden">
   <!-- Top bar -->
@@ -45,35 +72,56 @@
   </header>
 
   {#if view === 'fleet'}
-    <!-- master-detail + chat -->
-    <main class="flex-1 grid grid-cols-[220px_1fr_360px] min-h-0 overflow-hidden">
-      <section class="hud-panel border-l-0 border-y-0 min-h-0 overflow-auto">
+    <!-- master-detail + chat (resizable) -->
+    <main class="flex-1 flex min-h-0 overflow-hidden">
+      <section class="hud-panel border-l-0 border-y-0 min-h-0 overflow-auto shrink-0" style="width:220px">
         <VmList {selectedId} on:select={onSelect} on:changed={onVmChanged} key={listKey} />
       </section>
-      <section class="overflow-auto hud-grid min-h-0">
+      <section class="overflow-auto hud-grid min-h-0 flex-1">
         <VmDetail vmId={selectedId} on:changed={onVmChanged} on:deleted={onVmDeleted} />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
+      <div
+        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
+        role="separator"
+        aria-orientation="vertical"
+        on:mousedown={startDrag}
+        title="drag to resize chat"
+      ></div>
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
     </main>
   {:else if view === 'domains'}
-    <!-- domains + chat -->
-    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0 overflow-hidden">
-      <section class="overflow-auto hud-grid min-h-0">
+    <!-- domains + chat (resizable) -->
+    <main class="flex-1 flex min-h-0 overflow-hidden">
+      <section class="overflow-auto hud-grid min-h-0 flex-1">
         <Domains />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
+      <div
+        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
+        role="separator"
+        aria-orientation="vertical"
+        on:mousedown={startDrag}
+        title="drag to resize chat"
+      ></div>
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
     </main>
   {:else}
-    <!-- settings + chat -->
-    <main class="flex-1 grid grid-cols-[1fr_360px] min-h-0 overflow-hidden">
-      <section class="overflow-auto hud-grid p-4">
+    <!-- settings + chat (resizable) -->
+    <main class="flex-1 flex min-h-0 overflow-hidden">
+      <section class="overflow-auto hud-grid p-4 flex-1">
         <Settings />
       </section>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden">
+      <div
+        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
+        role="separator"
+        aria-orientation="vertical"
+        on:mousedown={startDrag}
+        title="drag to resize chat"
+      ></div>
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
     </main>
