@@ -29,8 +29,14 @@ async function req(path, { method = 'GET', body, auth = true } = {}) {
 export const api = {
   login: (username, password) =>
     req('/api/auth/login', { method: 'POST', body: { username, password }, auth: false }),
+  loginTwoFA: (pendingToken, code) =>
+    req('/api/auth/login/2fa', { method: 'POST', body: { pending_token: pendingToken, code }, auth: false }),
   logout: () => req('/api/auth/logout', { method: 'POST' }).catch(() => {}),
   me: () => req('/api/auth/me'),
+  twoFAStatus: () => req('/api/auth/2fa/status'),
+  twoFASetup: () => req('/api/auth/2fa/setup', { method: 'POST' }),
+  twoFAEnable: (code) => req('/api/auth/2fa/enable', { method: 'POST', body: { code } }),
+  twoFADisable: (password) => req('/api/auth/2fa/disable', { method: 'POST', body: { password } }),
   listVms: () => req('/api/vms'),
   getVm: (id) => req('/api/vms/' + id),
   createVm: (vm) => req('/api/vms', { method: 'POST', body: vm }),

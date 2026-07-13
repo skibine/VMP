@@ -17,6 +17,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -30,6 +31,9 @@ type User struct {
 	PasswordAlgo string `json:"password_algo"`
 	Role         string `json:"role"` // owner | guest
 	IsActive     bool   `json:"is_active"`
+	TOTPEnabled  bool   `json:"totp_enabled"`
+	TOTPSecret   string `json:"-"` // vault-encrypted at rest; plaintext only in RAM
+	BackupCodes  string `json:"-"` // JSON array of argon2id hashes
 	CreatedAt    string `json:"created_at"`
 	LastLoginAt  string `json:"last_login_at"`
 }
@@ -54,14 +58,16 @@ INSERT INTO users (username, password_hash, password_algo, role) VALUES (?,?,?,?
 
 // GetUserByUsername returns the user for login lookups.
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active, created_at, COALESCE(last_login_at,'')
-FROM users WHERE username = ?`, username)
+	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active,
+ totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,'')
+ FROM users WHERE username = ?`, username)
 }
 
 // GetUser returns a user by id.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
-	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active, created_at, COALESCE(last_login_at,'')
-FROM users WHERE id = ?`, id)
+	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active,
+ totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,'')
+ FROM users WHERE id = ?`, id)
 }
 
 // CountUsers returns the total number of users (used by bootstrap).
@@ -80,18 +86,56 @@ func (s *Store) SetLastLogin(ctx context.Context, id int64) error {
 
 func (s *Store) scanUser(ctx context.Context, q string, args ...any) (User, error) {
 	var u User
-	var active int
+	var active, totpEnabled int
+	var rawSecret, backups string
 	err := s.DB.QueryRowContext(ctx, q, args...).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.PasswordAlgo, &u.Role, &active, &u.CreatedAt, &u.LastLoginAt)
+		&u.ID, &u.Username, &u.PasswordHash, &u.PasswordAlgo, &u.Role, &active,
+		&totpEnabled, &rawSecret, &backups, &u.CreatedAt, &u.LastLoginAt)
 	if err == sql.ErrNoRows {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
 		return User{}, err
 	}
-	if u.LastLoginAt == "" {
-		u.LastLoginAt = ""
-	}
 	u.IsActive = active != 0
+	u.TOTPEnabled = totpEnabled != 0
+	u.TOTPSecret = s.decCol(rawSecret) // plaintext in RAM only
+	u.BackupCodes = backups
 	return u, nil
+}
+
+// EnableTOTP stores the (vault-encrypted) TOTP seed + backup-code hashes and flips the flag on.
+func (s *Store) EnableTOTP(ctx context.Context, userID int64, secret, backupHashes string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE users SET totp_secret=?, totp_enabled=1, backup_codes=? WHERE id=?`,
+		s.encCol(secret), backupHashes, userID)
+	if err != nil {
+		return fmt.Errorf("EnableTOTP: %w", err)
+	}
+	return nil
+}
+
+// DisableTOTP clears the TOTP seed, backup codes and the flag.
+func (s *Store) DisableTOTP(ctx context.Context, userID int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE users SET totp_secret='', totp_enabled=0, backup_codes='' WHERE id=?`, userID)
+	if err != nil {
+		return fmt.Errorf("DisableTOTP: %w", err)
+	}
+	return nil
+}
+
+// ConsumeBackupCode removes a matching backup-code hash (by index) and returns whether one matched.
+func (s *Store) ConsumeBackupCode(ctx context.Context, userID int64, hashes []string, matchIdx int) error {
+	hashes = append(hashes[:matchIdx], hashes[matchIdx+1:]...)
+	blob, _ := json.Marshal(hashes)
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET backup_codes=? WHERE id=?`, string(blob), userID)
+	return err
+}
+
+// HasAnyVMCredentials reports whether any VM currently stores SSH credentials (the 2FA cred-gate).
+func (s *Store) HasAnyVMCredentials(ctx context.Context) (bool, error) {
+	var n int64
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM vm_credentials`).Scan(&n)
+	return n > 0, err
 }

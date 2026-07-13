@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/skibine/vm-pulse/internal/ai"
+	"github.com/skibine/vm-pulse/internal/auth"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/store"
 )
@@ -37,11 +38,12 @@ const shutdownTimeout = 5 * time.Second
 // @purpose Bind an *http.Server to the store and expose its mux for testing (httptest).
 // endregion STRUCT_Server
 type Server struct {
-	store  *store.Store
-	logger *slog.Logger
-	srv    *http.Server
-	mux    *http.ServeMux
-	agent  *ai.Agent // nil when AI is not configured (chat endpoint -> 503)
+	store      *store.Store
+	logger     *slog.Logger
+	srv        *http.Server
+	mux        *http.ServeMux
+	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
+	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
 }
 
 // WithAgent attaches an AI agent (enables POST /api/ai/chat).
@@ -64,11 +66,16 @@ func (s *Server) Use(mw func(http.Handler) http.Handler) {
 // endregion FUNC_New
 func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
-	srv := &Server{store: s, logger: logger, mux: mux}
+	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA()}
 	mux.HandleFunc("/healthz", srv.healthHandler)
 	mux.HandleFunc("POST /api/auth/login", srv.login)
+	mux.HandleFunc("POST /api/auth/login/2fa", srv.loginTwoFA)
 	mux.HandleFunc("POST /api/auth/logout", srv.logout)
 	mux.HandleFunc("GET /api/auth/me", srv.me)
+	mux.HandleFunc("GET /api/auth/2fa/status", srv.twoFAStatus)
+	mux.HandleFunc("POST /api/auth/2fa/setup", srv.twoFASetup)
+	mux.HandleFunc("POST /api/auth/2fa/enable", srv.twoFAEnable)
+	mux.HandleFunc("POST /api/auth/2fa/disable", srv.twoFADisable)
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
 	RegisterCRUD(mux, s, logger)                    // TODO(auth): wrap CRUD routes with Plane B session middleware
 	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset

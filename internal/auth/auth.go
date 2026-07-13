@@ -156,13 +156,17 @@ func FromContext(ctx context.Context) (int64, bool) {
 	return v, ok
 }
 
-// isPublic: anything outside /api/ (frontend assets, /healthz) is public; only the login
-// endpoint under /api/ is public. All other /api/* routes require a valid session.
+// isPublic: anything outside /api/ (frontend assets, /healthz) is public; only the login endpoints
+// under /api/ are public (POST /api/auth/login and the 2FA-completion POST /api/auth/login/2fa).
+// All other /api/* routes require a valid session.
 func isPublic(r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
 		return true
 	}
-	return r.Method == http.MethodPost && r.URL.Path == "/api/auth/login"
+	if r.Method != http.MethodPost {
+		return false
+	}
+	return r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/login/2fa"
 }
 
 // extractToken: Authorization: Bearer <token>, cookie vmpulse_session, or ?token= (WebSocket).
