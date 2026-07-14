@@ -50,6 +50,9 @@
   // Recent log errors (journalctl) — Plane B one-shot over SSH.
   let errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
 
+  // Available package updates (apt simulate) — Plane B one-shot over SSH.
+  let updates = { data: null, busy: false, err: '', kind: '' }
+
   // Web-server virtual hosts (nginx/apache config) — Plane B one-shot over SSH.
   let vhosts = { data: null, busy: false, err: '', kind: '' }
 
@@ -128,13 +131,26 @@
     try {
       const d = await api.vmErrors(vmId, errors.range)
       if (d.error) {
-        // Structured dial-failure token from the backend (canonical: no_credentials / host_key_changed / ...).
         errors = { data: null, busy: false, err: d.detail || d.error, kind: d.error, range: errors.range }
       } else {
         errors = { data: d, busy: false, err: '', kind: '', range: errors.range }
       }
     } catch (e) {
       errors = { data: null, busy: false, err: e.message, kind: '', range: errors.range }
+    }
+  }
+
+  async function loadUpdates() {
+    updates = { data: null, busy: true, err: '', kind: '' }
+    try {
+      const d = await api.vmUpdates(vmId)
+      if (d.error) {
+        updates = { data: null, busy: false, err: d.detail || d.error, kind: d.error }
+      } else {
+        updates = { data: d, busy: false, err: '', kind: '' }
+      }
+    } catch (e) {
+      updates = { data: null, busy: false, err: e.message, kind: '' }
     }
   }
 
@@ -677,6 +693,37 @@
         {/if}
       {/if}
     </section>
+
+    <!-- Updates // available (apt simulate, Plane B over SSH) -->
+    {#if cred.has_secret}
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="hud-label text-neon-cyan">updates&nbsp;//&nbsp;available</span>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadUpdates} disabled={updates.busy}>{updates.busy ? '…' : '▶ check'}</button>
+      </div>
+      {#if updates.err}
+        <div class="text-xs font-mono text-neon-red">{updates.err}{#if updates.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+      {:else if updates.data}
+        <div class="flex items-center gap-3 flex-wrap">
+          {#if updates.data.count === 0}
+            <span class="hud-label text-neon-green">system up to date ✓</span>
+          {:else}
+            <span class="text-xs font-mono {updates.data.security_count > 0 ? 'text-neon-red' : 'text-neon-amber'}">{updates.data.count} upgradable{#if updates.data.security_count > 0} · {updates.data.security_count} security{/if}</span>
+          {/if}
+          {#if updates.data.reboot_required}
+            <span class="hud-label text-neon-red border border-neon-red/40 rounded px-1.5">⚠ reboot required</span>
+          {/if}
+          <span class="hud-label text-hud-dim">mgr: {updates.data.manager}</span>
+        </div>
+        {#if updates.data.packages?.length}
+          <details class="text-xs font-mono">
+            <summary class="hud-label text-hud-dim cursor-pointer">packages ({updates.data.packages.length})</summary>
+            <div class="flex flex-wrap gap-1 mt-1 max-h-40 overflow-auto">{#each updates.data.packages as p}<span class="border rounded px-1 {p.security ? 'text-neon-red border-neon-red/40' : 'text-emerald-200/70 border-hud-line'}" title={p.version + ' · ' + p.suite}>{p.name}{#if p.security} ⚡{/if}</span>{/each}</div>
+          </details>
+        {/if}
+      {/if}
+    </section>
+    {/if}
 
     <!-- Sites // vhosts (nginx/apache config, Plane B over SSH) — only when SSH creds exist -->
     {#if cred.has_secret}

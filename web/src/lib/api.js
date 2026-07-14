@@ -51,6 +51,7 @@ export const api = {
   portScan: (id) => req('/api/vms/' + id + '/portscan'),
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
+  vmUpdates: (id) => req('/api/vms/' + id + '/updates'),
   vmVHosts: (id) => req('/api/vms/' + id + '/vhosts'),
   vmInventory: (id) => req('/api/vms/' + id + '/inventory'),
   refreshInventory: (id) => req('/api/vms/' + id + '/inventory/refresh', { method: 'POST' }),

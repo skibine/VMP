@@ -28,6 +28,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/portscan", a.portScanVM)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
+	mux.HandleFunc("GET /api/vms/{id}/updates", a.updatesVM)
 	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
 	mux.HandleFunc("GET /api/vms/{id}/siteinfo", a.siteInfoVM)
 	mux.HandleFunc("GET /api/domains/{id}/info", a.domainInfo)
@@ -213,6 +214,26 @@ func (a *crudAPI) domainInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
 	writeJSON(w, http.StatusOK, info)
+}
+
+// updatesVM checks for available package updates over SSH (Plane B; read-only apt-get simulate).
+func (a *crudAPI) updatesVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	client, _, derr := a.dialer.Dial(r.Context(), id)
+	if derr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": classifyDialKind(derr), "detail": derr.Error()})
+		return
+	}
+	defer client.Close()
+	u, err := a.dialer.Updates(r.Context(), client)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "other", "detail": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
 }
 
 // runCheckNow executes a scheduled check immediately and persists the result.
