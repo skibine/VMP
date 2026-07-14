@@ -34,6 +34,9 @@
   // Quick-status battery: fixed credential-less probes (ssh/dns/web/tls) auto-run on select.
   let battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: '' }
 
+  // External port scan (common ports) — Plane A, no creds. Auto-runs on select.
+  let portscan = { ports: [], busy: false, err: '' }
+
   // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
   let ipinfo = { data: null, busy: false, err: '' }
 
@@ -69,6 +72,9 @@
 
   $: vmId != null && loadDetail(vmId)
   $: vmId != null && loadBattery(vmId)
+  $: vmId != null && loadPortScan(vmId)
+  // Whether the battery found a web server on :80 (gates the site-info panel).
+  $: batteryWebOk = battery.probes.some((p) => p.name === 'web' && p.status === 'ok')
 
   async function loadBattery(id) {
     battery = { probes: [], reachable: false, latency_ms: 0, busy: true, err: '' }
@@ -79,6 +85,29 @@
     } catch (e) {
       if (id !== vmId) return
       battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: e.message }
+    }
+  }
+
+  async function loadPortScan(id) {
+    portscan = { ports: [], busy: true, err: '' }
+    try {
+      const d = await api.portScan(id)
+      if (id !== vmId) return
+      portscan = { ports: d.ports || [], busy: false, err: '' }
+    } catch (e) {
+      if (id !== vmId) return
+      portscan = { ports: [], busy: false, err: e.message }
+    }
+  }
+
+  // probeHint explains a battery probe in a tooltip (the UI otherwise doesn't say what each is).
+  function probeHint(name) {
+    switch (name) {
+      case 'ssh': return 'TCP reach to the SSH port — is the box up?'
+      case 'dns': return 'resolves the hostname to an IP (only if a domain name is set)'
+      case 'web': return 'HTTP probe to :80 — is a web server answering?'
+      case 'tls': return 'TLS handshake to :443 — is HTTPS present?'
+      default: return name
     }
   }
 
@@ -496,13 +525,14 @@
         {:else}
           <div class="flex flex-wrap gap-1.5">
             {#each battery.probes as p}
-              <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono">
+              <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono" title={probeHint(p.name)}>
                 <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-hud-dim'}">{p.status === 'ok' ? '✓' : '✗'}</span>
                 <span class="text-hud-dim">{p.name}</span>
                 {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
               </div>
             {/each}
           </div>
+          <div class="text-[11px] text-hud-dim">// ssh=:22 reachable · web=:80 http · tls=:443 https · dns=name→ip (only if a hostname is set)</div>
           {#if !battery.probes.length}<div class="hud-label text-hud-dim">no probes</div>{/if}
         {/if}
       </section>
@@ -551,6 +581,31 @@
         {/if}
       </section>
     {/if}
+
+    <!-- Ports // exposed (external scan, Plane A, no creds) -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="hud-label text-neon-cyan">ports&nbsp;//&nbsp;exposed</span>
+        <span class="text-xs text-hud-dim font-mono ml-1">{portscan.ports.filter((p) => p.open).length} open / {portscan.ports.length} scanned</span>
+        <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadPortScan(vmId)} disabled={portscan.busy}>{portscan.busy ? '…' : '↻'}</button>
+      </div>
+      {#if portscan.busy}
+        <div class="hud-label text-hud-dim animate-pulse">scanning common ports…</div>
+      {:else if portscan.err}
+        <div class="text-xs font-mono text-neon-red">{portscan.err}</div>
+      {:else}
+        <div class="flex flex-wrap gap-1.5">
+          {#each portscan.ports as p}
+            <div class="flex items-center gap-1 border rounded px-1.5 py-0.5 text-xs font-mono {p.open ? 'border-neon-green/40 bg-neon-green/5' : 'border-hud-line opacity-50'}" title={p.open ? 'open — ' + p.service : 'closed/filtered'}>
+              <span class="{p.open ? 'text-neon-green' : 'text-hud-dim'}">{p.open ? '●' : '○'}</span>
+              <span class={p.open ? 'text-emerald-100' : 'text-hud-dim'}>{p.port}</span>
+              <span class="text-hud-dim">{p.service}</span>
+            </div>
+          {/each}
+        </div>
+        <div class="text-[11px] text-hud-dim">// scanned from the VM Pulse host (external view). ● = port answers, ○ = closed/filtered.</div>
+      {/if}
+    </section>
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
@@ -623,7 +678,8 @@
       {/if}
     </section>
 
-    <!-- Sites // vhosts (nginx/apache config, Plane B over SSH) -->
+    <!-- Sites // vhosts (nginx/apache config, Plane B over SSH) — only when SSH creds exist -->
+    {#if cred.has_secret}
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">sites&nbsp;//&nbsp;vhosts</span>
@@ -644,8 +700,10 @@
         {/if}
       {/if}
     </section>
+    {/if}
 
-    <!-- Site info (HTTP headers + security + CMS, Plane A keyless) -->
+    <!-- Site info (HTTP headers + security + CMS, Plane A keyless) — only when a web port answers -->
+    {#if vm.ip && (battery.busy || batteryWebOk)}
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">site&nbsp;//&nbsp;info</span>
@@ -671,6 +729,7 @@
         {#if siteinfo.data.redirected}<div class="text-[11px] font-mono text-hud-dim">→ {siteinfo.data.final_url}</div>{/if}
       {/if}
     </section>
+    {/if}
 
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
     <section class="hud-panel p-3 space-y-2">

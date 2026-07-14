@@ -25,6 +25,7 @@ import (
 func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
+	mux.HandleFunc("GET /api/vms/{id}/portscan", a.portScanVM)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
 	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
@@ -89,6 +90,26 @@ func (a *crudAPI) batteryVM(w http.ResponseWriter, r *http.Request) {
 	reg := monitor.DefaultRegistry()
 	outcomes := monitor.Battery(r.Context(), reg, vm, 6*time.Second)
 	writeJSON(w, http.StatusOK, monitor.Summarize(outcomes))
+}
+
+// portScanVM scans common TCP ports from the VM Pulse host (Plane A; no credentials) and reports
+// which face the internet.
+func (a *crudAPI) portScanVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	vm, err := a.st.GetVM(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "portScanVM", err)
+		return
+	}
+	host := vm.IP
+	if host == "" {
+		host = vm.Hostname
+	}
+	ports := monitor.PortScan(r.Context(), host, 8*time.Second)
+	writeJSON(w, http.StatusOK, map[string]any{"host": host, "ports": ports})
 }
 
 // ipInfoVM returns the geo/ASN/PTR info for the VM's public IP (Plane A, keyless).

@@ -48,6 +48,7 @@ export const api = {
   runCheckNow: (id) => req('/api/checks/' + id + '/run', { method: 'POST' }),
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
+  portScan: (id) => req('/api/vms/' + id + '/portscan'),
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   vmVHosts: (id) => req('/api/vms/' + id + '/vhosts'),
