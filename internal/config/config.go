@@ -47,11 +47,15 @@ type Config struct {
 	Auth     Auth    `yaml:"auth"`
 	Vault    Vault   `yaml:"vault"`
 	Metrics  Metrics `yaml:"metrics"`
+
+	// VaultFromConfig is set at runtime when the passphrase came from config.yaml (so we can warn
+	// that the on-disk config + DB together still expose secrets; prefer env/prompt). Not from YAML.
+	VaultFromConfig bool `yaml:"-"`
 }
 
 // Metrics configures the credential-free pull metrics poller (Plane A, SSH pull-over-SSH).
 type Metrics struct {
-	PollIntervalSec int `yaml:"poll_interval_sec"` // poll cadence; default 300 (5 min)
+	PollIntervalSec int `yaml:"poll_interval_sec"` // poll cadence; default 900 (15 min) — slow on purpose (creds touched each poll)
 }
 
 // region STRUCT_Auth [DOMAIN(9): Configuration; CONCEPT(8): Bootstrap; TECH(6): struct]

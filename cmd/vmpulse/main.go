@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -34,6 +35,7 @@ import (
 	"github.com/skibine/vm-pulse/internal/monitor"
 	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
+	"golang.org/x/term"
 )
 
 // region FUNC_main [DOMAIN(8): Entry; CONCEPT(7): Bootstrap; TECH(7): main]
@@ -43,6 +45,7 @@ import (
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config.yaml")
 	reset2FA := flag.String("reset-2fa", "", "BREAK-GLASS: disable 2FA for the given username and exit (run on the box if locked out)")
+	askPass := flag.Bool("ask-passphrase", false, "prompt for the vault master passphrase at startup (hidden input) instead of reading it from config/env")
 	flag.Parse()
 
 	logger := logging.Setup(parseLevel("info"), os.Stdout)
@@ -67,7 +70,7 @@ func main() {
 		}
 	}()
 
-	armVault(context.Background(), s, cfg, logger)
+	armVault(context.Background(), s, cfg, logger, *askPass)
 
 	// BREAK-GLASS recovery: a user who lost their authenticator AND backup codes can be unblocked by
 	// an operator with filesystem access: `vmpulse -config ... -reset-2fa <username>`. This disables
@@ -132,7 +135,8 @@ func main() {
 	// records CPU/RAM/disk/load samples; hourly downsampling (§5.2). Runs until ctx is cancelled.
 	pollInterval := time.Duration(cfg.Metrics.PollIntervalSec) * time.Second
 	if pollInterval <= 0 {
-		pollInterval = 5 * time.Minute // default cadence (60s was too noisy for small fleets)
+		pollInterval = 15 * time.Minute // default cadence: slow on purpose — SSH creds are touched each poll,
+		// so we favor on-demand snapshots + a slow trend poll over frequent root-SSH dialing.
 	}
 	go metrics.New(s, sshDialer, logger).WithInterval(pollInterval).Run(ctx)
 
@@ -213,17 +217,22 @@ func bootstrapAdmin(ctx context.Context, s *store.Store, cfg *config.Config, log
 
 // region FUNC_armVault [DOMAIN(9): Security; CONCEPT(7): AtRestKey; TECH(7): argon2id,config_meta]
 // @purpose Derive the at-rest key from the master passphrase and a persisted salt; arm the store.
-// @complexity 4
+// @complexity 5
 // @invariants
 //   - The passphrase is NEVER persisted; only the random salt is (config_meta.vault_salt).
+//   - Passphrase resolution: --ask-passphrase prompt > VMPULSE_VAULT_PASSPHRASE env > config.yaml
+//     (config is a fallback and logs a warning — the recommended paths are the prompt or env var,
+//     so the passphrase does not live next to the DB on disk).
 //   - Empty passphrase -> vault disabled (plaintext secrets).
 //
 // endregion FUNC_armVault
-func armVault(ctx context.Context, s *store.Store, cfg *config.Config, logger *slog.Logger) {
-	if !cfg.Vault.Configured() {
-		logging.LDD(logger, 7, "main", "VAULT_DISABLED", "set vault.passphrase to encrypt secrets")
+func armVault(ctx context.Context, s *store.Store, cfg *config.Config, logger *slog.Logger, ask bool) {
+	pass := resolvePassphrase(cfg, ask, logger)
+	if strings.TrimSpace(pass) == "" {
+		logging.LDD(logger, 7, "main", "VAULT_DISABLED", "set vault.passphrase (or VMPULSE_VAULT_PASSPHRASE / --ask-passphrase) to encrypt secrets")
 		return
 	}
+	cfg.Vault.Passphrase = pass // so the rest of startup (e.g. cred decryption) uses the resolved value
 	saltStr, ok, err := s.GetMeta(ctx, "vault_salt")
 	var salt []byte
 	if err != nil {
@@ -244,8 +253,34 @@ func armVault(ctx context.Context, s *store.Store, cfg *config.Config, logger *s
 		logging.LDD(logger, 10, "main", "VAULT_SALT_EMPTY", "cannot arm vault without a salt")
 		return
 	}
-	s.SetVault(crypto.NewVault(cfg.Vault.Passphrase, salt))
-	logging.LDD(logger, 9, "main", "VAULT_ARMED", "at-rest encryption enabled")
+	s.SetVault(crypto.NewVault(pass, salt))
+	src := "env"
+	switch {
+	case ask:
+		src = "prompt"
+	case cfg.VaultFromConfig:
+		src = "config.yaml (WARNING: prefer --ask-passphrase or VMPULSE_VAULT_PASSPHRASE)"
+	}
+	logging.LDD(logger, 9, "main", "VAULT_ARMED", "at-rest encryption enabled (source="+src+")")
+}
+
+// resolvePassphrase picks the master passphrase: prompt > env > config (lowest priority).
+func resolvePassphrase(cfg *config.Config, ask bool, logger *slog.Logger) string {
+	if ask {
+		fmt.Fprint(os.Stderr, "vault master passphrase: ")
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			logging.LDD(logger, 10, "main", "VAULT_PROMPT_FAIL", err.Error())
+			return ""
+		}
+		return string(b)
+	}
+	if env := os.Getenv("VMPULSE_VAULT_PASSPHRASE"); env != "" {
+		return env
+	}
+	cfg.VaultFromConfig = cfg.Vault.Configured()
+	return cfg.Vault.Passphrase
 }
 
 // region FUNC_seedAI [DOMAIN(9): AI; CONCEPT(7): Migration; TECH(6): store]

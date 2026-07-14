@@ -676,7 +676,7 @@
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
-        <span class="hud-label text-hud-dim ml-auto">polls via ssh</span>
+        <span class="hud-label text-hud-dim ml-auto">ssh pull · ~15min</span>
         <button class="hud-btn !py-0.5" on:click={toggleMetrics}>{vm.metrics_enabled ? '● on' : '○ off'}</button>
       </div>
       {#if vm.metrics_enabled}
@@ -699,7 +699,7 @@
           <MetricsChart label="net tx" unit="KB/s" data={series.net_tx_kbps} decimals={1} color="#f472b6" />
         </div>
       {:else}
-        <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds.</p>
+        <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds. Tip: use a restricted monitoring user (sudo allowlist) instead of root — same metrics, smaller blast radius. On-demand snapshot below works without enabling this.</p>
       {/if}
     </section>
 

@@ -26,7 +26,17 @@ auth:
   bootstrap_admin_username: ""
   bootstrap_admin_password: ""
 
-# Master passphrase for encrypting secrets at rest (channel tokens, later SSH creds).
+# Master passphrase for encrypting secrets at rest (SSH creds, channel tokens, TOTP seeds).
+# The passphrase is NEVER persisted; only a random salt is. Resolution order (first wins):
+#   1. --ask-passphrase        (prompt at startup, hidden input — most secure)
+#   2. VMPULSE_VAULT_PASSPHRASE env var
+#   3. vault.passphrase below  (fallback; logs a WARNING — config + DB on the same disk still expose)
 # Empty = vault disabled (secrets stored plaintext). Keep config.yaml at 0600. NEVER commit.
+# Run VM Pulse on a trusted host (home machine / your own VPS) behind 2FA; don't expose :listen raw.
 vault:
   passphrase: ""
+
+# Metrics pull-poller cadence (seconds). Slow on purpose: each poll touches stored SSH creds.
+# Default 900 (15 min). Prefer on-demand snapshots (open a VM) over frequent scheduled polling.
+metrics:
+  poll_interval_sec: 900
