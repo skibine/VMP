@@ -555,13 +555,11 @@
       </section>
     {/if}
 
-    <!-- Masonry: column count follows the CONTAINER width (not the viewport), so a narrow center
-         shows 1 column and a wide one shows more — consistent regardless of chat/list width.
-         Panels flow at natural height; battery + terminal span all columns. -->
-    <div class="columns-[210px] gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
+    <!-- Responsive grid: as many 200px columns as fit (container-responsive), battery+terminal full width. -->
+    <div class="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-3">
 
     <!-- Status battery (auto-run on select) + one-shot tools -->
-    <div class="grid grid-cols-2 gap-3 break-inside-avoid [column-span:all]">
+    <div class="grid grid-cols-2 gap-3 col-span-full">
       <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">status&nbsp;//&nbsp;battery</span>
@@ -669,7 +667,7 @@
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
-      <section class="hud-panel p-3 space-y-2">
+      <section class="hud-panel p-3 space-y-2 col-span-full">
         <div class="flex items-center gap-2">
           <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
           <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : '↻ refresh'}</button>
@@ -712,7 +710,7 @@
     {/if}
 
     <!-- Logs // errors (journalctl priority=err, Plane B over SSH) -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-3 space-y-2 col-span-full">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">logs&nbsp;//&nbsp;errors</span>
         {#each ['1h', '24h', '7d'] as r}
@@ -823,7 +821,7 @@
     {/if}
 
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-3 space-y-2 col-span-full">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
         <span class="hud-label text-hud-dim ml-auto">ssh pull · ~15min</span>
@@ -854,7 +852,7 @@
     </section>
 
     <!-- Live (interactive terminal) + one-shot snapshot (only when metrics history is off) -->
-    <section class="hud-panel p-3 space-y-2 [column-span:all]">
+    <section class="hud-panel p-3 space-y-2 col-span-full">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;terminal</span>
         {#if !vm.metrics_enabled}
