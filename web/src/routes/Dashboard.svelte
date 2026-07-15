@@ -5,9 +5,10 @@
   import VmDetail from '../components/VmDetail.svelte'
   import ChatPanel from '../components/ChatPanel.svelte'
   import Domains from '../components/Domains.svelte'
+  import Alerts from '../components/Alerts.svelte'
   import Settings from './Settings.svelte'
 
-  let view = 'fleet' // 'fleet' | 'domains' | 'settings'
+  let view = 'fleet' // 'fleet' | 'domains' | 'alerts' | 'settings'
   let selectedId = null
 
   // Refresh the list when a VM is edited/added/archived (so names/health update).
@@ -63,6 +64,7 @@
     <div class="flex items-center gap-1">
       <button class="hud-btn {view === 'fleet' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'fleet')}>fleet</button>
       <button class="hud-btn {view === 'domains' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'domains')}>domains</button>
+      <button class="hud-btn {view === 'alerts' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'alerts')}>alerts</button>
       <button class="hud-btn {view === 'settings' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'settings')}>settings</button>
     </div>
     <div class="ml-auto flex items-center gap-4">
@@ -107,6 +109,13 @@
       <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
+    </main>
+  {:else if view === 'alerts'}
+    <!-- alerts (full width) -->
+    <main class="flex-1 min-h-0 overflow-hidden">
+      <section class="overflow-auto hud-grid min-h-0">
+        <Alerts />
+      </section>
     </main>
   {:else}
     <!-- settings + chat (resizable) -->
