@@ -78,6 +78,18 @@
   $: vmId != null && loadPortScan(vmId)
   // Whether the battery found a web server on :80 (gates the site-info panel).
   $: batteryWebOk = battery.probes.some((p) => p.name === 'web' && p.status === 'ok')
+  // Liveness verdict: the box is UP if anything answered (ping/ssh/web/tls) OR any port is open.
+  // A single port (e.g. ssh:22) failing must NOT flip a reachable box to "down".
+  $: portscanOpen = portscan.ports.filter((p) => p.open).length
+  $: livenessUp = battery.reachable || portscanOpen > 0
+  $: livenessEvidence = (() => {
+    const ping = battery.probes.find((p) => p.name === 'ping' && p.status === 'ok')
+    if (ping) return 'ping ' + Number(ping.latency_ms).toFixed(0) + 'ms'
+    if (batteryWebOk) return 'web :80'
+    if (battery.probes.some((p) => p.name === 'ssh' && p.status === 'ok')) return 'ssh'
+    if (portscanOpen > 0) return portscanOpen + ' ports open'
+    return 'unreachable'
+  })()
 
   async function loadBattery(id) {
     battery = { probes: [], reachable: false, latency_ms: 0, busy: true, err: '' }
@@ -106,7 +118,8 @@
   // probeHint explains a battery probe in a tooltip (the UI otherwise doesn't say what each is).
   function probeHint(name) {
     switch (name) {
-      case 'ssh': return 'TCP reach to the SSH port — is the box up?'
+      case 'ping': return 'ICMP echo — does the box respond to ping? (true liveness)'
+      case 'ssh': return 'TCP reach to the SSH port — is SSH reachable on this port?'
       case 'dns': return 'resolves the hostname to an IP (only if a domain name is set)'
       case 'web': return 'HTTP probe to :80 — is a web server answering?'
       case 'tls': return 'TLS handshake to :443 — is HTTPS present?'
@@ -244,6 +257,10 @@
 
   $: healthWord = !health ? '' : health.status === 'ok' ? 'up' : health.status === 'critical' ? 'down' : health.status === 'warn' ? 'degraded' : 'unknown'
   $: healthColor = healthWord === 'up' ? 'neon-green' : healthWord === 'down' ? 'neon-red' : healthWord === 'degraded' ? 'neon-amber' : 'hud-dim'
+  // Header verdict = LIVENESS (is the box up?), not the K2 service-health score. A reachable box
+  // stays "up" even if a monitored service (e.g. ssh:22) is critical.
+  $: headerVerdict = battery.busy ? '…' : (livenessUp ? 'up' : (battery.probes.length ? 'down' : '…'))
+  $: headerColor = headerVerdict === 'up' ? 'neon-green' : headerVerdict === 'down' ? 'neon-red' : 'hud-dim'
   $: healthReason = (() => {
     if (!health || health.status === 'ok') return ''
     const bad = (health.breakdown || []).find((b) => b.status && b.status !== 'ok')
@@ -469,10 +486,11 @@
     <div class="hud-panel p-4">
       <div class="flex items-center gap-2">
         <h2 class="font-mono text-neon-green text-lg truncate">{vm.name}</h2>
-        <span class="hud-label text-{healthColor} ml-auto uppercase">{healthWord}</span>
+        <span class="hud-label text-{headerColor} ml-auto uppercase">{headerVerdict}</span>
       </div>
       <div class="text-xs text-hud-dim font-mono mt-1">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</div>
-      {#if healthReason}<div class="text-[11px] font-mono text-{healthColor} mt-0.5">reason: {healthReason}</div>{/if}
+      {#if !livenessUp && !battery.busy && battery.probes.length}<div class="text-[11px] font-mono text-neon-red mt-0.5">unreachable — no ping, no open ports</div>{/if}
+      {#if livenessUp && healthReason}<div class="text-[11px] font-mono text-neon-amber mt-0.5">service: {healthReason} (box is up)</div>{/if}
       {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as t}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{t}</span>{/each}<span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{:else}<div class="mt-2"><span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{/if}
       <div class="flex items-center gap-2 mt-3">
         <button class="hud-btn" on:click={() => (editMode = !editMode)}>{editMode ? '✕ close' : '⚙ edit'}</button>
@@ -530,12 +548,12 @@
         <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">status&nbsp;//&nbsp;battery</span>
           {#if !battery.busy && battery.probes.length}
-            <span class="hud-label ml-auto uppercase {battery.reachable ? 'text-neon-green' : 'text-neon-red'}">{battery.reachable ? 'reachable' : 'no ssh'}</span>
+            <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? 'up' : 'down'} · <span class="normal-case">{livenessEvidence}</span></span>
           {/if}
           <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
         </div>
         {#if battery.busy}
-          <div class="hud-label text-hud-dim animate-pulse">probing ssh · dns · web · tls…</div>
+          <div class="hud-label text-hud-dim animate-pulse">probing ping · ssh · dns · web · tls…</div>
         {:else if battery.err}
           <div class="text-xs font-mono text-neon-red">{battery.err}</div>
         {:else}
@@ -543,12 +561,12 @@
             {#each battery.probes as p}
               <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono" title={probeHint(p.name)}>
                 <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-hud-dim'}">{p.status === 'ok' ? '✓' : '✗'}</span>
-                <span class="text-hud-dim">{p.name}</span>
+                <span class="text-hud-dim">{p.name === 'ssh' ? 'ssh:' + (vm.port_ssh || 22) : p.name}</span>
                 {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
               </div>
             {/each}
           </div>
-          <div class="text-[11px] text-hud-dim">// ssh=:22 reachable · web=:80 http · tls=:443 https · dns=name→ip (only if a hostname is set)</div>
+          <div class="text-[11px] text-hud-dim">// ping=ICMP echo · ssh=:22 reachable (set the real port in ⚙ edit if non-standard) · web=:80 · tls=:443 · dns=name→ip</div>
           {#if !battery.probes.length}<div class="hud-label text-hud-dim">no probes</div>{/if}
         {/if}
       </section>

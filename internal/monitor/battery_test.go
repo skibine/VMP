@@ -71,8 +71,8 @@ func TestBattery_LocalListener(t *testing.T) {
 func TestBuildBatterySpecs(t *testing.T) {
 	ipOnly := store.VM{IP: "10.0.0.5", PortSSH: 22}
 	s := BuildBatterySpecs(ipOnly)
-	if len(s) == 0 || s[0].Name != "ssh" {
-		t.Fatalf("ssh must be first spec, got %+v", s)
+	if len(s) == 0 || s[0].Name != "ping" {
+		t.Fatalf("ping must be first spec (primary liveness), got %+v", s)
 	}
 	for _, sp := range s {
 		if sp.Name == "dns" {

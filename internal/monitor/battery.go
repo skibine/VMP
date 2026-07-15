@@ -64,6 +64,7 @@ func BuildBatterySpecs(vm store.VM) []ProbeSpec {
 	}
 	port := strconv.Itoa(vm.PortSSH)
 	specs := []ProbeSpec{
+		{Name: "ping", Type: "ping", Target: host},
 		{Name: "ssh", Type: "tcp", Target: host, Params: map[string]any{"port": port, "timeout_sec": float64(4)}},
 	}
 	if isDomainName(vm.Hostname) {
@@ -125,30 +126,51 @@ func Battery(ctx context.Context, reg *Registry, vm store.VM, timeout time.Durat
 	return out
 }
 
-// Reachable reports whether the ssh/tcp probe in the battery succeeded (the box is up).
+// Reachable reports whether the box is UP: true if ANY battery probe answered (ping/ssh/web/tls).
+// A single port (e.g. ssh:22) being unreachable must NOT flip a reachable box to "down" — only a
+// box where nothing responds at all is unreachable.
 func Reachable(outcomes []ProbeOutcome) bool {
 	for _, o := range outcomes {
-		if o.Name == "ssh" {
-			return o.Status == string(StatusOK)
+		if o.Status == string(StatusOK) {
+			return true
 		}
 	}
 	return false
 }
 
-// SummaryLatency returns the ssh probe latency (headline), 0 if absent.
-func SummaryLatency(outcomes []ProbeOutcome) float64 {
+// UpVia returns the probe names that proved the box is up (ping/ssh/web/tls), for the UI evidence.
+func UpVia(outcomes []ProbeOutcome) []string {
+	var via []string
 	for _, o := range outcomes {
-		if o.Name == "ssh" {
-			return o.LatencyMS
+		if o.Status == string(StatusOK) {
+			via = append(via, o.Name)
 		}
 	}
-	return 0
+	return via
+}
+
+// SummaryLatency returns the best headline latency: ping first (true RTT), else any ok probe.
+func SummaryLatency(outcomes []ProbeOutcome) float64 {
+	best := 0.0
+	for _, o := range outcomes {
+		if o.Status != string(StatusOK) {
+			continue
+		}
+		if o.Name == "ping" {
+			return o.LatencyMS
+		}
+		if best == 0 || (o.LatencyMS > 0 && o.LatencyMS < best) {
+			best = o.LatencyMS
+		}
+	}
+	return best
 }
 
 // BatterySummary is the JSON shape returned by the /battery endpoint.
 type BatterySummary struct {
 	Probes    []ProbeOutcome `json:"probes"`
 	Reachable bool           `json:"reachable"`
+	UpVia     []string       `json:"up_via"`
 	LatencyMS float64        `json:"latency_ms"`
 }
 
@@ -157,6 +179,7 @@ func Summarize(outcomes []ProbeOutcome) BatterySummary {
 	return BatterySummary{
 		Probes:    outcomes,
 		Reachable: Reachable(outcomes),
+		UpVia:     UpVia(outcomes),
 		LatencyMS: SummaryLatency(outcomes),
 	}
 }
