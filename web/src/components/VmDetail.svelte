@@ -555,11 +555,12 @@
       </section>
     {/if}
 
-    <!-- Dense panel grid: small panels flow into 2-3 columns; wide ones span full width. -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3 items-start">
+    <!-- Masonry: panels flow with natural heights (no gaps), fixed column count per breakpoint
+         (consistent across VMs); battery + terminal span all columns for width. -->
+    <div class="columns-1 lg:columns-2 2xl:columns-3 gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
 
     <!-- Status battery (auto-run on select) + one-shot tools -->
-    <div class="grid grid-cols-2 gap-3 lg:col-span-2 2xl:col-span-3">
+    <div class="grid grid-cols-2 gap-3 break-inside-avoid [column-span:all]">
       <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">status&nbsp;//&nbsp;battery</span>
@@ -659,7 +660,7 @@
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
-      <section class="hud-panel p-3 space-y-2 lg:col-span-2 2xl:col-span-3">
+      <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
           <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
           <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : '↻ refresh'}</button>
@@ -813,7 +814,7 @@
     {/if}
 
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
-    <section class="hud-panel p-3 space-y-2 lg:col-span-2 2xl:col-span-3">
+    <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
         <span class="hud-label text-hud-dim ml-auto">ssh pull · ~15min</span>
@@ -844,7 +845,7 @@
     </section>
 
     <!-- Live (interactive terminal) + one-shot snapshot (only when metrics history is off) -->
-    <section class="hud-panel p-3 space-y-2 lg:col-span-2 2xl:col-span-3">
+    <section class="hud-panel p-3 space-y-2 [column-span:all]">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;terminal</span>
         {#if !vm.metrics_enabled}
