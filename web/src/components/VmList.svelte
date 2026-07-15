@@ -56,6 +56,21 @@
           : 'hud-dim'
   }
 
+  // unknown (no/pending checks) renders as a VISIBLE hollow ring, not an invisible grey blob.
+  function dotClass(status) {
+    return status === 'unknown'
+      ? 'border border-hud-line bg-transparent'
+      : 'bg-' + color(status)
+  }
+  function dotTitle(status) {
+    switch (status) {
+      case 'ok': return 'up — all checks ok'
+      case 'warn': return 'up, but a monitored service is failing (amber)'
+      case 'critical': return 'no check succeeded — likely down (red)'
+      default: return 'unmonitored — add a ping check in monitoring to track this VM'
+    }
+  }
+
   onMount(load)
 </script>
 
@@ -87,7 +102,7 @@
           class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selectedId === vm.id ? 'bg-hud-panel2 border-l-2 border-l-neon-green' : ''}"
           on:click={() => dispatch('select', vm.id)}
         >
-          <span class="h-2 w-2 rounded-full bg-{color(st)} shrink-0"></span>
+          <span class="h-2 w-2 rounded-full shrink-0 {dotClass(st)}" title={dotTitle(st)}></span>
           <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
           <span class="min-w-0">
             <span class="block font-mono text-sm text-emerald-100 truncate">{vm.name}</span>

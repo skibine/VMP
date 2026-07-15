@@ -897,8 +897,9 @@
     <!-- Monitoring (collapsible) -->
     <details class="hud-panel p-3">
       <summary class="hud-label text-neon-cyan cursor-pointer">monitoring&nbsp;//&nbsp;{checks.length} scheduled</summary>
+      <div class="text-[11px] text-hud-dim mt-1">// continuous 24/7 checks — these drive the list status dot + alerts. Battery/tools above are one-shot. Add a `ping` check to track liveness.</div>
       <div class="space-y-2 mt-2">
-        {#if !checks.length}<div class="hud-label">none</div>{:else}
+        {#if !checks.length}<div class="hud-label text-neon-amber">// unmonitored — add a ping check to enable the status dot for this VM.</div>{:else}
           <div class="space-y-1">
             {#each checks as c (c.id)}
               {@const r = results.find((x) => x.check_id === c.id)}
