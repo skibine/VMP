@@ -46,6 +46,7 @@ export const api = {
   listChecks: (vmId) => req('/api/checks?vm_id=' + vmId),
   createCheck: (c) => req('/api/checks', { method: 'POST', body: c }),
   runCheckNow: (id) => req('/api/checks/' + id + '/run', { method: 'POST' }),
+  deleteCheck: (id) => req('/api/checks/' + id, { method: 'DELETE' }),
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
   portScan: (id) => req('/api/vms/' + id + '/portscan'),

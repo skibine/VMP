@@ -24,7 +24,12 @@
         (vms || []).map(async (v) => {
           try {
             const h = await api.vmHealth(v.id)
-            return [v.id, h.status]
+            // Derive a liveness-ish state: green=all ok; amber=some service down BUT at least one
+            // check ok (box reachable, a service failing); red=NO check ok (likely down); dim=unknown.
+            const anyOk = (h.breakdown || []).some((b) => b.status === 'ok')
+            let st = h.status
+            if (st === 'critical' && anyOk) st = 'warn' // reachable but degraded -> amber, not red
+            return [v.id, st]
           } catch (_) {
             return [v.id, 'unknown']
           }

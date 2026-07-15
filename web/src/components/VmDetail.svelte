@@ -28,7 +28,7 @@
   let system = null // inventory from cred-save probe
 
   let diag = { check_type: 'tcp', param: '', busy: false, msg: '', res: null }
-  let nc = { check_type: 'tcp', target: '', interval_sec: 60 }
+  let nc = { check_type: 'ping', target: '', interval_sec: 60 }
   let checkMsg = ''
 
   // Quick-status battery: fixed credential-less probes (ssh/dns/web/tls) auto-run on select.
@@ -287,6 +287,17 @@
     try {
       await api.runCheckNow(c.id)
       await loadDetail(vmId, true)
+    } catch (e) {
+      checkMsg = e.message
+    }
+  }
+
+  async function removeCheck(c) {
+    if (!confirm('Delete this ' + c.check_type + ' check?')) return
+    try {
+      await api.deleteCheck(c.id)
+      await loadDetail(vmId, true)
+      dispatch('changed')
     } catch (e) {
       checkMsg = e.message
     }
@@ -895,7 +906,8 @@
                 <span class="text-emerald-200 w-14">{c.check_type}</span>
                 {#if r}<span class="hud-label {r.latest_status === 'ok' ? 'text-neon-green' : r.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{r.latest_status}</span><span class="text-hud-dim">{Number(r.latest_latency_ms).toFixed(1)}ms</span>{:else}<span class="hud-label text-hud-dim">pending</span>{/if}
                 <span class="ml-auto text-hud-dim">/{c.interval_sec}s</span>
-                <button class="hud-btn !px-2 !py-0.5" on:click={() => runNow(c)}>▶</button>
+                <button class="hud-btn !px-2 !py-0.5" on:click={() => runNow(c)} title="run now">▶</button>
+                <button class="hud-btn !px-2 !py-0.5 !text-neon-red border-neon-red/40" on:click={() => removeCheck(c)} title="delete">✕</button>
               </div>
             {/each}
           </div>
