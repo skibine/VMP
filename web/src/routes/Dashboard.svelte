@@ -79,7 +79,7 @@
       <section class="hud-panel border-l-0 border-y-0 min-h-0 overflow-auto shrink-0" style="width:220px">
         <VmList {selectedId} on:select={onSelect} on:changed={onVmChanged} key={listKey} />
       </section>
-      <section class="overflow-auto hud-grid min-h-0 flex-1 [scrollbar-gutter:stable]">
+      <section class="overflow-auto hud-grid min-h-0 flex-1">
         <VmDetail vmId={selectedId} on:changed={onVmChanged} on:deleted={onVmDeleted} />
       </section>
       <div
