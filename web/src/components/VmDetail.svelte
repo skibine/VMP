@@ -555,9 +555,10 @@
       </section>
     {/if}
 
-    <!-- Masonry: panels flow with natural heights (no gaps), fixed column count per breakpoint
-         (consistent across VMs); battery + terminal span all columns for width. -->
-    <div class="columns-1 lg:columns-2 2xl:columns-3 gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
+    <!-- Masonry: column count follows the CONTAINER width (not the viewport), so a narrow center
+         shows 1 column and a wide one shows more — consistent regardless of chat/list width.
+         Panels flow at natural height; battery + terminal span all columns. -->
+    <div class="columns-[210px] gap-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
 
     <!-- Status battery (auto-run on select) + one-shot tools -->
     <div class="grid grid-cols-2 gap-3 break-inside-avoid [column-span:all]">
@@ -645,16 +646,24 @@
       {:else if portscan.err}
         <div class="text-xs font-mono text-neon-red">{portscan.err}</div>
       {:else}
-        <div class="flex flex-wrap gap-1.5">
-          {#each portscan.ports as p}
-            <div class="flex items-center gap-1 border rounded px-1.5 py-0.5 text-xs font-mono {p.open ? 'border-neon-green/40 bg-neon-green/5' : 'border-hud-line opacity-50'}" title={p.open ? 'open — ' + p.service : 'closed/filtered'}>
-              <span class="{p.open ? 'text-neon-green' : 'text-hud-dim'}">{p.open ? '●' : '○'}</span>
-              <span class={p.open ? 'text-emerald-100' : 'text-hud-dim'}>{p.port}</span>
-              <span class="text-hud-dim">{p.service}</span>
-            </div>
-          {/each}
-        </div>
-        <div class="text-[11px] text-hud-dim">// scanned from the VM Pulse host (external view). ● = port answers, ○ = closed/filtered.</div>
+        {#if portscanOpen > 0}
+          <div class="flex flex-wrap gap-1.5">
+            {#each portscan.ports.filter((p) => p.open) as p}
+              <div class="flex items-center gap-1 border border-neon-green/40 bg-neon-green/5 rounded px-1.5 py-0.5 text-xs font-mono" title={'open — ' + p.service}>
+                <span class="text-neon-green">●</span>
+                <span class="text-emerald-100">{p.port}</span>
+                <span class="text-hud-dim">{p.service}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <details class="text-[11px] font-mono text-hud-dim">
+          <summary class="cursor-pointer">{portscan.ports.length - portscanOpen} closed/filtered of {portscan.ports.length} common ports</summary>
+          <div class="flex flex-wrap gap-1 mt-1 opacity-60">
+            {#each portscan.ports.filter((p) => !p.open) as p}<span class="border border-hud-line rounded px-1">○ {p.port}</span>{/each}
+          </div>
+        </details>
+        <div class="text-[11px] text-hud-dim">// scanned from the VM Pulse host (external view). only open ports shown above.</div>
       {/if}
     </section>
 
