@@ -92,17 +92,18 @@ type Check struct {
 	VMID        *int64         `json:"vm_id"`
 	DomainID    *int64         `json:"domain_id"`
 	TargetType  string         `json:"target_type"` // vm | domain
-	CheckType   string         `json:"check_type"`  // ping|tcp|http|whois|tls|agent|prom
+	CheckType   string         `json:"check_type"`  // liveness|ping|tcp|http|whois|tls|dns|dnsbl
 	Params      map[string]any `json:"params"`
 	IntervalSec int            `json:"interval_sec"`
 	Enabled     bool           `json:"enabled"`
 	Thresholds  map[string]any `json:"thresholds"`
+	System      bool           `json:"system"` // system-managed (auto liveness) — not user-deletable
 	CreatedAt   string         `json:"created_at"`
 }
 
 // validCheckTypes is the closed set of supported checker types (Plane A engine, next slice).
 var validCheckTypes = map[string]struct{}{
-	"ping": {}, "tcp": {}, "http": {}, "whois": {}, "tls": {}, "agent": {}, "prom": {},
+	"liveness": {}, "ping": {}, "tcp": {}, "http": {}, "whois": {}, "tls": {}, "dns": {}, "dnsbl": {}, "agent": {}, "prom": {},
 }
 
 // region FUNC_Check_Validate [DOMAIN(7): Validation; CONCEPT(8): Rules; TECH(5): pure]

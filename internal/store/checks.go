@@ -29,10 +29,10 @@ func (s *Store) CreateCheck(ctx context.Context, c Check) (int64, error) {
 		return 0, err
 	}
 	res, err := s.DB.ExecContext(ctx, `
-INSERT INTO checks (vm_id, domain_id, target_type, check_type, params, interval_sec, enabled, thresholds)
-VALUES (?,?,?,?,?,?,?,?)`,
+INSERT INTO checks (vm_id, domain_id, target_type, check_type, params, interval_sec, enabled, thresholds, system)
+VALUES (?,?,?,?,?,?,?,?,?)`,
 		nullInt64(c.VMID), nullInt64(c.DomainID), c.TargetType, c.CheckType,
-		marshalJSONcol(c.Params), c.IntervalSec, toBoolInt(c.Enabled), marshalJSONcol(c.Thresholds))
+		marshalJSONcol(c.Params), c.IntervalSec, toBoolInt(c.Enabled), marshalJSONcol(c.Thresholds), toBoolInt(c.System))
 	if err != nil {
 		logging.LDD(s.logger, 10, "CreateCheck", "INSERT_FAIL", err.Error())
 		return 0, fmt.Errorf("CreateCheck: %w", err)
@@ -106,34 +106,62 @@ UPDATE checks SET vm_id=?, domain_id=?, target_type=?, check_type=?, params=?, i
 }
 
 // region FUNC_DeleteCheck [DOMAIN(8): Storage; CONCEPT(7): Delete; TECH(5): database/sql]
-// @purpose Physically delete a check.
+// @purpose Physically delete a check. System checks (auto liveness) are not user-deletable.
 // @complexity 3
 // endregion FUNC_DeleteCheck
 func (s *Store) DeleteCheck(ctx context.Context, id int64) error {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM checks WHERE id=?`, id)
+	var system int
+	_ = s.DB.QueryRowContext(ctx, `SELECT system FROM checks WHERE id=?`, id).Scan(&system)
+	if system != 0 {
+		return ErrSystemCheck
+	}
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM checks WHERE id=? AND system=0`, id)
 	if err != nil {
 		return fmt.Errorf("DeleteCheck: %w", err)
 	}
 	return rowsAffected(res, "DeleteCheck", id)
 }
 
+// ErrSystemCheck signals an attempt to mutate a system-managed check (e.g. the auto liveness probe).
+var ErrSystemCheck = errors.New("system check cannot be modified")
+
+// EnsureSystemLiveness makes sure a VM has exactly one system liveness check (the composite
+// ping/ssh/web/tls probe that drives the fleet dot). Idempotent; re-creates if missing.
+func (s *Store) EnsureSystemLiveness(ctx context.Context, vmID int64, portSSH int) error {
+	var n int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM checks WHERE vm_id=? AND system=1`, vmID).Scan(&n)
+	if n > 0 {
+		return nil
+	}
+	port := portSSH
+	if port == 0 {
+		port = 22
+	}
+	_, err := s.CreateCheck(ctx, Check{
+		VMID: &vmID, TargetType: "vm", CheckType: "liveness", Enabled: true, IntervalSec: 60,
+		System: true, Params: map[string]any{"port": port},
+	})
+	return err
+}
+
 func checkSelectCols() string {
-	return `SELECT id, vm_id, domain_id, target_type, check_type, params, interval_sec, enabled, thresholds, created_at FROM checks`
+	return `SELECT id, vm_id, domain_id, target_type, check_type, params, interval_sec, enabled, thresholds, system, created_at FROM checks`
 }
 
 func scanCheck(sc scanner) (Check, error) {
 	var c Check
 	var params, thresholds string
 	var vmID, domainID sql.NullInt64
-	var enabled int
+	var enabled, system int
 	err := sc.Scan(&c.ID, &vmID, &domainID, &c.TargetType, &c.CheckType, &params,
-		&c.IntervalSec, &enabled, &thresholds, &c.CreatedAt)
+		&c.IntervalSec, &enabled, &thresholds, &system, &c.CreatedAt)
 	if err != nil {
 		return c, err
 	}
 	c.VMID = toInt64Ptr(vmID)
 	c.DomainID = toInt64Ptr(domainID)
 	c.Enabled = toBool(enabled)
+	c.System = toBool(system)
 	c.Params = map[string]any{}
 	c.Thresholds = map[string]any{}
 	unmarshalJSONcol(params, &c.Params)

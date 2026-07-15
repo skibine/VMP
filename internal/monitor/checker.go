@@ -133,6 +133,7 @@ func num(v any) (float64, bool) {
 // DefaultRegistry returns a registry with all built-in checkers registered.
 func DefaultRegistry() *Registry {
 	return NewRegistry(
+		&LivenessChecker{},
 		&TCPChecker{},
 		&HTTPChecker{},
 		&TLSChecker{},

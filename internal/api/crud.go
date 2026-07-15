@@ -148,6 +148,12 @@ func (a *crudAPI) createVM(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "createVM", err)
 		return
 	}
+	// Auto-provision the always-on system liveness check (drives the fleet dot, independent of alerts).
+	port := v.PortSSH
+	if port == 0 {
+		port = 22
+	}
+	_ = a.st.EnsureSystemLiveness(r.Context(), id, port)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 

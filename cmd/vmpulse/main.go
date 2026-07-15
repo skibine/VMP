@@ -114,6 +114,14 @@ func main() {
 	eng.Start(ctx)
 	defer eng.Stop()
 
+	// Ensure every VM has the always-on system liveness check (drives the fleet dot independently of
+	// alert config). Backfills pre-existing VMs that predate the auto-provisioning.
+	if vms, err := s.ListVMs(context.Background(), true); err == nil {
+		for _, vm := range vms {
+			_ = s.EnsureSystemLiveness(context.Background(), vm.ID, vm.PortSSH)
+		}
+	}
+
 	// Plane A alert evaluator (consumes results, fires alerts to channels).
 	ev := alerts.New(s, alerts.DefaultRegistry(logger), logger, 30*time.Second)
 	ev.Start(ctx)

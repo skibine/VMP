@@ -78,6 +78,8 @@
   $: vmId != null && loadPortScan(vmId)
   // Whether the battery found a web server on :80 (gates the site-info panel).
   $: batteryWebOk = battery.probes.some((p) => p.name === 'web' && p.status === 'ok')
+  // User-configured alert checks (system liveness is auto-managed + hidden from this list).
+  $: userChecks = checks.filter((c) => !c.system)
   // Liveness verdict: the box is UP if anything answered (ping/ssh/web/tls) OR any port is open.
   // A single port (e.g. ssh:22) failing must NOT flip a reachable box to "down".
   $: portscanOpen = portscan.ports.filter((p) => p.open).length
@@ -894,14 +896,14 @@
       {/if}
     </section>
 
-    <!-- Monitoring (collapsible) -->
+    <!-- Alert checks (user-configured; system liveness is auto-managed and hidden) -->
     <details class="hud-panel p-3">
-      <summary class="hud-label text-neon-cyan cursor-pointer">monitoring&nbsp;//&nbsp;{checks.length} scheduled</summary>
-      <div class="text-[11px] text-hud-dim mt-1">// continuous 24/7 checks — these drive the list status dot + alerts. Battery/tools above are one-shot. Add a `ping` check to track liveness.</div>
+      <summary class="hud-label text-neon-cyan cursor-pointer">alert checks&nbsp;//&nbsp;{userChecks.length}</summary>
+      <div class="text-[11px] text-hud-dim mt-1">// extra checks for alerting on specific services. Liveness (the status dot) is always-on automatically — you don't configure it here.</div>
       <div class="space-y-2 mt-2">
-        {#if !checks.length}<div class="hud-label text-neon-amber">// unmonitored — add a ping check to enable the status dot for this VM.</div>{:else}
+        {#if !userChecks.length}<div class="hud-label text-hud-dim">// none — liveness is tracked automatically. Add a check (e.g. tcp:443) to alert on a specific service.</div>{:else}
           <div class="space-y-1">
-            {#each checks as c (c.id)}
+            {#each userChecks as c (c.id)}
               {@const r = results.find((x) => x.check_id === c.id)}
               <div class="flex items-center gap-2 text-xs font-mono border border-hud-line rounded px-2 py-1">
                 <span class="text-emerald-200 w-14">{c.check_type}</span>

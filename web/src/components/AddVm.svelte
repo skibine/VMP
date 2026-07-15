@@ -21,14 +21,8 @@
         ip: ip.trim(),
         port_ssh: Number(port) || 22
       })
-      // Default liveness probe: ICMP ping (true up/down). If the host can't do unprivileged ICMP,
-      // the checker reports "unknown" (NOT critical/down) — so a filtered ping never false-alarms.
-      // SSH-port-specific monitoring can be added separately; liveness must not hinge on ssh:22.
-      try {
-        await api.createCheck({ vm_id: res.id, target_type: 'vm', check_type: 'ping', interval_sec: 60 })
-      } catch (_) {
-        /* default reachability check is optional */
-      }
+      // The backend auto-provisions a system liveness check (composite ping/ssh/web/tls) that
+      // drives the fleet status dot — no need to create a check here.
       dispatch('created')
     } catch (e) {
       error = e.message
