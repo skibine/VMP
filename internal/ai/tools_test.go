@@ -34,7 +34,9 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 	s := newAIStore(t)
 	ctx := context.Background()
 	vmID, _ := s.CreateVM(ctx, store.VM{Name: "web1", Hostname: "10.0.0.1", IP: "10.0.0.1", PortSSH: 22, Tags: []string{"prod"}})
-	// A second VM that the operator has NOT granted AI access to — must stay hidden from the model.
+	// A second VM the operator has NOT granted AI access to. Per the visibility model it is still
+	// VISIBLE in the fleet list (name/IP/liveness) so the model can target its IP from a granted
+	// VM; ai_access=false marks that command execution / deep data is not allowed on it.
 	hiddenID, _ := s.CreateVM(ctx, store.VM{Name: "secret", Hostname: "10.0.0.2", IP: "10.0.0.2", PortSSH: 22})
 	if err := s.SetAIEnabled(ctx, vmID, true); err != nil {
 		t.Fatalf("SetAIEnabled: %v", err)
@@ -49,8 +51,22 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 		t.Fatalf("list_vms: %v", err)
 	}
 	var vms []map[string]any
-	if err := json.Unmarshal([]byte(out), &vms); err != nil || len(vms) != 1 || vms[0]["name"] != "web1" {
-		t.Fatalf("list_vms must show only ai-enabled VM (got %d): %s", len(vms), out)
+	if err := json.Unmarshal([]byte(out), &vms); err != nil || len(vms) != 2 {
+		t.Fatalf("list_vms must show the WHOLE fleet (got %d): %s", len(vms), out)
+	}
+	// Both VMs present; ai_access flag distinguishes granted from non-granted.
+	byName := map[string]map[string]any{}
+	for _, v := range vms {
+		byName[v["name"].(string)] = v
+	}
+	if byName["web1"]["ai_access"] != true {
+		t.Fatalf("granted VM must have ai_access=true: %v", byName["web1"])
+	}
+	if byName["secret"]["ai_access"] != false {
+		t.Fatalf("non-granted VM must have ai_access=false: %v", byName["secret"])
+	}
+	if byName["secret"]["ip"] != "10.0.0.2" {
+		t.Fatalf("non-granted VM IP must still be visible: %v", byName["secret"])
 	}
 
 	out, err = reg.Run(ctx, "get_vm_health", map[string]any{"vm_id": float64(vmID)})
@@ -62,12 +78,17 @@ func TestStoreTools_listVmsAndHealth(t *testing.T) {
 		t.Fatalf("get_vm_health bad output: %s", out)
 	}
 
-	// Non-granted VM: health tool must refuse and results must be withheld.
+	// Non-granted VM: liveness (fleet overview) is still readable; deep data is what's gated.
 	out, _ = reg.Run(ctx, "get_vm_health", map[string]any{"vm_id": float64(hiddenID)})
-	if !strings.Contains(out, "ai access disabled") {
-		t.Fatalf("non-granted VM must be refused, got: %s", out)
+	if err := json.Unmarshal([]byte(out), &hs); err != nil || hs["status"] == nil {
+		t.Fatalf("non-granted VM liveness must be readable, got: %s", out)
 	}
-	t.Logf("[IMP:8][TestAI][ACCESS] list_vms=%d (hidden excluded), non-granted health refused", len(vms))
+	// But list_vm_results (deep data) must be withheld for the non-granted VM.
+	out, _ = reg.Run(ctx, "list_vm_results", map[string]any{"vm_id": float64(hiddenID)})
+	if !strings.Contains(out, "ai access disabled") {
+		t.Fatalf("non-granted VM deep results must be refused, got: %s", out)
+	}
+	t.Logf("[IMP:8][TestAI][ACCESS] list_vms=%d (whole fleet), non-granted liveness readable, deep results refused", len(vms))
 
 	// Unknown tool.
 	if _, err := reg.Run(ctx, "nope", nil); err == nil {

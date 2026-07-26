@@ -47,6 +47,10 @@ var (
 type Dialer struct {
 	st     *store.Store
 	logger *slog.Logger
+
+	// IdleTimeout bounds an interactive web-SSH session with no traffic (keystrokes). <=0 = default
+	// (30 min). Set by the api layer from config before ServeTerminal runs.
+	IdleTimeout time.Duration
 }
 
 // New builds a Dialer bound to a store (with armed vault) and a logger.

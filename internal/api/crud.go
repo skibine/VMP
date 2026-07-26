@@ -154,6 +154,7 @@ func (a *crudAPI) createVM(w http.ResponseWriter, r *http.Request) {
 		port = 22
 	}
 	_ = a.st.EnsureSystemLiveness(r.Context(), id, port)
+	_ = a.st.EnsureSystemExposures(r.Context(), id)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
@@ -262,6 +263,11 @@ func decodeCheck(w http.ResponseWriter, r *http.Request, c *store.Check) bool {
 		if _, ok := probe["enabled"]; !ok {
 			c.Enabled = true
 		}
+	}
+	// Default the cadence when omitted so a new lightweight check does not require the caller to
+	// pick an interval (the store enforces >= 1s; 60s matches the system liveness probe default).
+	if c.IntervalSec <= 0 {
+		c.IntervalSec = 60
 	}
 	return true
 }

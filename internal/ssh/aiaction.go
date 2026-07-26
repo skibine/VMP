@@ -27,7 +27,15 @@ import (
 
 // RunCommand executes an approved command over an open client and returns bounded combined output.
 // The caller's ctx bounds the run; on ctx cancellation the remote command is best-effort killed.
-func (d *Dialer) RunCommand(ctx context.Context, client *gossh.Client, command string) (string, error) {
+//
+// sudo handling: the AI executor is non-interactive (no PTY), so a sudo password prompt cannot be
+// answered. If the command's first token is `sudo`:
+//   - sudoPassword != "" -> rewrite to `sudo -S -p '' <rest>` and feed the password on stdin (one
+//     line). This lets the AI install packages / restart services when the operator stored a sudo
+//     password for the VM.
+//   - sudoPassword == "" -> rewrite to `sudo -n <rest>` (passwordless / NOPASSWD sudoers entry);
+//     if a password is actually required, sudo exits non-zero with a clear error.
+func (d *Dialer) RunCommand(ctx context.Context, client *gossh.Client, command, sudoPassword string) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", fmt.Errorf("empty command")
@@ -35,11 +43,15 @@ func (d *Dialer) RunCommand(ctx context.Context, client *gossh.Client, command s
 	if IsDestructiveCommand(command) {
 		return "", fmt.Errorf("refused: command matches a destructive pattern (rm -rf /, mkfs, dd to disk, fork bomb)")
 	}
+	cmd, stdin := prepareSudo(command, sudoPassword)
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("run-command: new session: %w", err)
 	}
 	defer sess.Close()
+	if stdin != "" {
+		sess.Stdin = strings.NewReader(stdin)
+	}
 
 	type result struct {
 		out []byte
@@ -47,7 +59,7 @@ func (d *Dialer) RunCommand(ctx context.Context, client *gossh.Client, command s
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, err := sess.CombinedOutput(command)
+		out, err := sess.CombinedOutput(cmd)
 		done <- result{out, err}
 	}()
 	select {
@@ -67,9 +79,31 @@ func (d *Dialer) RunCommand(ctx context.Context, client *gossh.Client, command s
 	}
 }
 
+// prepareSudo rewrites a `sudo ...` command for non-interactive execution and returns the (command,
+// stdin) pair. stdin is the sudo password line when -S is used, empty otherwise. Non-sudo commands
+// pass through unchanged. A bare `sudo` with nothing after it is left as-is (no injection).
+func prepareSudo(command, sudoPassword string) (string, string) {
+	t := strings.TrimSpace(command)
+	if t != "sudo" && !strings.HasPrefix(t, "sudo ") {
+		return command, ""
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(t, "sudo"))
+	if rest == "" {
+		return command, "" // bare sudo — don't inject (would start an interactive root shell)
+	}
+	if sudoPassword != "" {
+		return "sudo -S -p '' " + rest, sudoPassword + "\n"
+	}
+	return "sudo -n " + rest, ""
+}
+
 // destructivePatterns are catastrophic commands refused even after operator approval.
+// BUG_FIX_CONTEXT: now that RunCommand supports `sudo -S` (commands can run as ROOT), the rm
+// backstop must block recursive deletes of root AND system directories (/, /home, /etc, ...),
+// not just bare `rm -rf /`. Normal cleanups still pass: `rm -rf /home/user/temp` (subpath) and
+// `rm /tmp/file` (no -r) are allowed.
 var destructivePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\brm\s+-[a-z]*r[a-z]*f?\s+/(\s|$)`), // rm -rf /
+	regexp.MustCompile(`(?i)\brm\s+-[a-z]*r[a-z]*\s+/(?:home|etc|usr|var|boot|bin|sbin|lib|lib64|root|opt|srv|proc|sys|dev|run)?/?(?:\s|$)`),
 	regexp.MustCompile(`(?i)\bmkfs\b`),
 	regexp.MustCompile(`(?i)\bdd\b.*\bof=/dev/(sd|nvme|vd|hd|xvd)`),
 	regexp.MustCompile(`(?i):\s*\(\s*\)\s*\{`), // fork bomb :(){:|:&};:

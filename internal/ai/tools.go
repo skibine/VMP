@@ -84,7 +84,7 @@ func StoreTools(s *store.Store) []Tool {
 	return []Tool{
 		{
 			Name:        "list_vms",
-			Description: "List the virtual machines the operator has granted the assistant access to (ai_enabled), with their ids, names, hostnames and tags.",
+			Description: "List ALL virtual machines in the fleet with id, name, hostname, ip, tags, liveness status (ok|warn|critical|unknown), and ai_access (true = you may run commands on that VM). The whole fleet is visible so you can target any VM's IP; ai_access only gates command execution and deep data.",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			Run: func(ctx context.Context, _ map[string]any) (string, error) {
 				vms, err := s.ListVMs(ctx, false)
@@ -97,20 +97,35 @@ func StoreTools(s *store.Store) []Tool {
 					Hostname string   `json:"hostname"`
 					IP       string   `json:"ip"`
 					Tags     []string `json:"tags"`
+					AIAccess bool     `json:"ai_access"` // true = command execution + deep data allowed
+					Status   string   `json:"status"`    // ok|warn|critical|unknown
 				}
 				out := make([]vmSum, 0, len(vms))
 				for _, v := range vms {
-					if !v.AIEnabled { // per-VM opt-in: only granted VMs are visible to the model
-						continue
+					// Fleet metadata (name/IP/liveness) is visible for EVERY VM; ai_access only
+					// gates mutation/deep-data. This lets the model target any IP (e.g. traceroute
+					// from a granted VM to a non-granted one) without blind spots.
+					status := "unknown"
+					if rows, err := s.LatestResultsForVM(ctx, v.ID); err == nil {
+						checks := make([]health.CheckStatus, 0, len(rows))
+						for _, row := range rows {
+							if row.Enabled {
+								checks = append(checks, health.CheckStatus{
+									CheckID: row.CheckID, CheckType: row.CheckType,
+									Status: row.LatestStatus, LatencyMS: row.LatestLatency,
+								})
+							}
+						}
+						status = health.Compute(checks, health.DefaultWeights()).Status
 					}
-					out = append(out, vmSum{v.ID, v.Name, v.Hostname, v.IP, v.Tags})
+					out = append(out, vmSum{v.ID, v.Name, v.Hostname, v.IP, v.Tags, v.AIEnabled, status})
 				}
 				return jsonStr(out)
 			},
 		},
 		{
 			Name:        "get_vm_health",
-			Description: "Get the K2 health-score (0-100) and status for a VM by its id (only if ai access is granted).",
+			Description: "Get the liveness health-score (0-100) and status (ok|warn|critical|unknown) for any VM by id. Liveness is fleet-wide overview; available for every VM.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"vm_id": map[string]any{"type": "integer"}},
@@ -121,12 +136,8 @@ func StoreTools(s *store.Store) []Tool {
 				if !ok {
 					return "", fmt.Errorf("vm_id required")
 				}
-				vm, err := s.GetVM(ctx, id)
-				if err != nil {
+				if _, err := s.GetVM(ctx, id); err != nil {
 					return jsonStr(map[string]any{"error": "vm not found", "vm_id": id})
-				}
-				if !vm.AIEnabled {
-					return jsonStr(map[string]any{"error": "ai access disabled for this vm", "vm_id": id})
 				}
 				rows, err := s.LatestResultsForVM(ctx, id)
 				if err != nil {
@@ -148,7 +159,7 @@ func StoreTools(s *store.Store) []Tool {
 		},
 		{
 			Name:        "list_vm_results",
-			Description: "List the latest result of each check for a VM by its id (only if ai access is granted).",
+			Description: "List the latest result of each check for a VM by id. Requires ai_access for that VM (detailed per-VM operational data).",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{"vm_id": map[string]any{"type": "integer"}},

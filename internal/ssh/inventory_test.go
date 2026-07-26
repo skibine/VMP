@@ -5,12 +5,13 @@
 package ssh
 
 import (
+	"strings"
 	"testing"
 )
 
 const sampleInventory = "=os=\nUbuntu 22.04.4 LTS\n=uname=\nLinux 5.15.0-112-generic x86_64\n" +
 	"=cpu=\n Intel(R) Xeon(R) CPU E5-2680\n=meminfo=\nMemTotal:       4014080 kB\nSwapTotal:      1048576 kB\n" +
-	"=up=\n 12:30:01 up 10 days,  3:42,  2 users\n=ports=\n22\n80\n443\n=docker=\nweb|nginx:alpine|Up 2 hours\ndb|postgres:15|Up 2 hours\n=pkgs=\n482\n=svc=\n23\n"
+	"=up=\n 12:30:01 up 10 days,  3:42,  2 users\n=ports=\n22\n80\n443\n=docker=\nweb|nginx:alpine|Up 2 hours|0.0.0.0:80->80/tcp\ndb|postgres:15|Exited (1) 5 minutes ago\n=pkgs=\n482\n=svc=\n23\n"
 
 func TestParseInventory(t *testing.T) {
 	inv := parseInventory(sampleInventory)
@@ -30,7 +31,20 @@ func TestParseInventory(t *testing.T) {
 		t.Errorf("ports: %v", inv.Ports)
 	}
 	if len(inv.Docker) != 2 {
-		t.Errorf("docker: %v", inv.Docker)
+		t.Fatalf("docker: %v", inv.Docker)
+	}
+	// Running container: parsed name/image/status/ports + Up flag.
+	web := inv.Docker[0]
+	if web.Name != "web" || web.Image != "nginx:alpine" || web.Status != "Up 2 hours" || !web.Up {
+		t.Errorf("docker[0] web: %+v", web)
+	}
+	if web.Ports != "0.0.0.0:80->80/tcp" {
+		t.Errorf("docker[0] ports: %q", web.Ports)
+	}
+	// Stopped container: Exited -> Up=false.
+	db := inv.Docker[1]
+	if db.Name != "db" || !strings.HasPrefix(db.Status, "Exited") || db.Up {
+		t.Errorf("docker[1] db: %+v", db)
 	}
 	if inv.Uptime != "10 days,  3:42" {
 		t.Errorf("uptime: %q", inv.Uptime)

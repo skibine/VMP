@@ -42,7 +42,7 @@ func ActionTools(s *store.Store, exec ActionExecutor) []Tool {
 	return []Tool{
 		{
 			Name:        "propose_command",
-			Description: "Propose a shell command to run on an ai-enabled VM. By default it waits for the operator to approve the action in the UI; if auto-approve is enabled it runs immediately and returns the output.",
+			Description: "Propose a shell command to run on an ai-enabled VM. By default it waits for the operator to approve the action in the UI; if auto-approve is enabled it runs immediately and returns the output. sudo is supported: if the operator stored a sudo password for the VM, prefix the command with `sudo ` (e.g. `sudo apt install -y traceroute`) and it will run non-interactively; without a stored sudo password, `sudo -n` (passwordless) is used.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

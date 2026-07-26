@@ -91,8 +91,11 @@ func (d *Dialer) ServeTerminal(ctx context.Context, c *websocket.Conn, client *g
 	}
 	logging.LDD(d.logger, 7, "ServeTerminal", "STARTED", fmt.Sprintf("pty %dx%d", rows, cols))
 
-	// idle watchdog: 30 min without traffic closes the session.
-	const idle = 30 * time.Minute
+	// idle watchdog: no keystrokes for IdleTimeout (default 30 min) closes the session.
+	idle := d.IdleTimeout
+	if idle <= 0 {
+		idle = 30 * time.Minute
+	}
 	idleT := time.NewTimer(idle)
 	defer idleT.Stop()
 	ctx2, cancel := context.WithCancel(ctx)

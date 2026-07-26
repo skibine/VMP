@@ -32,7 +32,7 @@ echo =cpu=; grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2
 echo =meminfo=; grep -E 'MemTotal|SwapTotal' /proc/meminfo 2>/dev/null
 echo =up=; uptime
 echo =ports=; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null) | grep -oE ':[0-9]+' | tr -d : | sort -un | head -60
-echo =docker=; (docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null) | head -30
+echo =docker=; { docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null || sudo -n docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null; } | head -40
 echo =pkgs=; (dpkg -l 2>/dev/null | grep -c '^ii') || echo 0
 echo =pkgsn=; (dpkg -l 2>/dev/null | awk '/^ii/{print $2}' | head -400)
 echo =svc=; (systemctl list-units --type=service --state=running --no-legend 2>/dev/null | wc -l) || echo 0
@@ -48,11 +48,20 @@ type Inventory struct {
 	SwapTotalMB  int      `json:"swap_total_mb"`
 	Uptime       string   `json:"uptime"`
 	Ports        []int    `json:"ports"`
-	Docker       []string `json:"docker"`
+	Docker       []Container `json:"docker"`
 	Packages     int      `json:"packages"`
 	PackagesList []string `json:"packages_list"`
 	Services     int      `json:"services"`
 	ServicesList []string `json:"services_list"`
+}
+
+// Container is one docker container parsed from `docker ps` (name|image|status|ports).
+type Container struct {
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Status string `json:"status"`
+	Ports  string `json:"ports"`
+	Up     bool   `json:"up"` // derived: status starts with "Up" (vs Exited/Restarting/...)
 }
 
 // region FUNC_Dialer_Inventory [DOMAIN(8): Observability; CONCEPT(8): Inventory; TECH(8): ssh,regex]
@@ -121,9 +130,27 @@ func parseInventory(out string) Inventory {
 	}
 	for _, line := range strings.Split(sec["docker"], "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" {
-			inv.Docker = append(inv.Docker, line)
+		if line == "" {
+			continue
 		}
+		// Each line is name|image|status|ports (pipe-delimited; docker never emits a pipe in these
+		// fields). Missing trailing fields (older/empty Ports) are tolerated.
+		p := strings.SplitN(line, "|", 4)
+		c := Container{}
+		if len(p) > 0 {
+			c.Name = strings.TrimSpace(p[0])
+		}
+		if len(p) > 1 {
+			c.Image = strings.TrimSpace(p[1])
+		}
+		if len(p) > 2 {
+			c.Status = strings.TrimSpace(p[2])
+		}
+		if len(p) > 3 {
+			c.Ports = strings.TrimSpace(p[3])
+		}
+		c.Up = strings.HasPrefix(c.Status, "Up")
+		inv.Docker = append(inv.Docker, c)
 	}
 	inv.Packages = 0
 	if v, err := strconv.Atoi(strings.TrimSpace(sec["pkgs"])); err == nil {

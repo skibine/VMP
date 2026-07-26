@@ -65,9 +65,15 @@ func (a *crudAPI) approveAIAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close()
+	// Fetch the stored sudo password (if any) so privileged commands (install/restart/...) run via
+	// `sudo -S` instead of failing on a non-interactive password prompt.
+	var sudoPassword string
+	if creds, ok, _ := a.st.GetVMCredentials(r.Context(), act.VMID); ok {
+		sudoPassword = creds.SudoPassword
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	out, runErr := a.dialer.RunCommand(ctx, client, act.Command)
+	out, runErr := a.dialer.RunCommand(ctx, client, act.Command, sudoPassword)
 	status := "done"
 	if runErr != nil {
 		status = "error"

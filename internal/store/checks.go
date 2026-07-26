@@ -144,6 +144,81 @@ func (s *Store) EnsureSystemLiveness(ctx context.Context, vmID int64, portSSH in
 	return err
 }
 
+// EnsureSystemExposures makes sure a VM has exactly one system exposures check (the periodic
+// curated security scan) at a 1h cadence (10-probe network scan — frequent enough that a fixed
+// exposure clears within the hour, light enough for a small fleet). Idempotent; also bumps any
+// legacy 6h interval to 1h. Filtered by check_type because liveness is also a system check.
+func (s *Store) EnsureSystemExposures(ctx context.Context, vmID int64) error {
+	var id int64
+	var interval int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id, interval_sec FROM checks WHERE vm_id=? AND system=1 AND check_type='exposures' LIMIT 1`, vmID).Scan(&id, &interval)
+	if err == nil {
+		if interval != 3600 {
+			_, _ = s.DB.ExecContext(ctx, `UPDATE checks SET interval_sec=3600 WHERE id=?`, id)
+		}
+		return nil
+	}
+	_, err = s.CreateCheck(ctx, Check{
+		VMID: &vmID, TargetType: "vm", CheckType: "exposures", Enabled: true, IntervalSec: 60 * 60,
+		System: true, Params: map[string]any{},
+	})
+	return err
+}
+
+// SystemCheckID returns the id of a VM's system check of the given type (e.g. "exposures"),
+// or 0 if none exists. Used so an on-demand scan can persist its result into the right check.
+func (s *Store) SystemCheckID(ctx context.Context, vmID int64, checkType string) (int64, error) {
+	var id int64
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id FROM checks WHERE vm_id=? AND system=1 AND check_type=? LIMIT 1`, vmID, checkType).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// PropagateExposuresResult applies an exposures scan result to every non-archived VM whose scan
+// target (ip OR hostname) matches — because probing the same host yields the same result. exceptVMID
+// is the already-persisted source and is skipped to avoid a duplicate row. This is what makes a fix
+// on a shared host clear the alert fleet-wide: scan ONE VM on the host, all the rest update too.
+// Returns the number of additional VMs updated.
+//
+// BUG_FIX_CONTEXT: the pool is SetMaxOpenConns(1) (SQLite serialization). We MUST collect the VM ids
+// and close the rows iterator BEFORE issuing per-VM queries — nesting a query inside rows.Next()
+// self-deadlocks on the single connection and hangs every DB access (incl. /healthz).
+func (s *Store) PropagateExposuresResult(ctx context.Context, exceptVMID int64, target, status, message string, detail map[string]any) (int, error) {
+	if target == "" {
+		return 0, nil
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id FROM vms WHERE (ip=? OR hostname=?) AND archived_at IS NULL`, target, target)
+	if err != nil {
+		return 0, err
+	}
+	var vmIDs []int64
+	for rows.Next() {
+		var vmID int64
+		if err := rows.Scan(&vmID); err == nil && vmID != exceptVMID {
+			vmIDs = append(vmIDs, vmID)
+		}
+	}
+	qErr := rows.Err()
+	rows.Close() // release the single connection before per-VM queries
+
+	updated := 0
+	for _, vmID := range vmIDs {
+		checkID, err := s.SystemCheckID(ctx, vmID, "exposures")
+		if err != nil || checkID == 0 {
+			continue
+		}
+		if _, err := s.InsertCheckResult(ctx, checkID, status, 0, message, detail); err == nil {
+			updated++
+		}
+	}
+	return updated, qErr
+}
+
 func checkSelectCols() string {
 	return `SELECT id, vm_id, domain_id, target_type, check_type, params, interval_sec, enabled, thresholds, system, created_at FROM checks`
 }

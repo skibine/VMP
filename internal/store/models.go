@@ -103,7 +103,7 @@ type Check struct {
 
 // validCheckTypes is the closed set of supported checker types (Plane A engine, next slice).
 var validCheckTypes = map[string]struct{}{
-	"liveness": {}, "ping": {}, "tcp": {}, "http": {}, "whois": {}, "tls": {}, "dns": {}, "dnsbl": {}, "agent": {}, "prom": {},
+	"liveness": {}, "exposures": {}, "ping": {}, "tcp": {}, "http": {}, "whois": {}, "tls": {}, "dns": {}, "dnsbl": {}, "agent": {}, "prom": {},
 }
 
 // region FUNC_Check_Validate [DOMAIN(7): Validation; CONCEPT(8): Rules; TECH(5): pure]

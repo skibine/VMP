@@ -95,7 +95,7 @@ func (c LogChannel) Deliver(ctx context.Context, config map[string]any, msg Mess
 	return nil
 }
 
-// DefaultRegistry returns the built-in channel implementations (log + telegram).
+// DefaultRegistry returns the built-in channel implementations (log + telegram + webhook).
 func DefaultRegistry(logger *slog.Logger) *Registry {
-	return NewRegistry(LogChannel{Logger: logger}, &TelegramChannel{})
+	return NewRegistry(LogChannel{Logger: logger}, &TelegramChannel{}, &WebhookChannel{})
 }

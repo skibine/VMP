@@ -47,10 +47,21 @@ type Config struct {
 	Auth     Auth    `yaml:"auth"`
 	Vault    Vault   `yaml:"vault"`
 	Metrics  Metrics `yaml:"metrics"`
+	Server   Server  `yaml:"server"`
 
 	// VaultFromConfig is set at runtime when the passphrase came from config.yaml (so we can warn
 	// that the on-disk config + DB together still expose secrets; prefer env/prompt). Not from YAML.
 	VaultFromConfig bool `yaml:"-"`
+	// VaultFromFile is set at runtime when the passphrase came from passphrase_file (preferred over
+	// config.yaml; also the systemd LoadCredential path). Not from YAML.
+	VaultFromFile bool `yaml:"-"`
+}
+
+// Server configures the HTTP server's security posture for the most dangerous surface: the
+// interactive web-SSH terminal (full fleet access). Limits are per-user.
+type Server struct {
+	WebSSHSessionLimit int `yaml:"web_ssh_session_limit"` // max concurrent web-SSH terminals per user; default 3, 0 = default
+	WebSSHIdleMin      int `yaml:"web_ssh_idle_min"`      // idle session reaper, minutes; default 30, 0 = default
 }
 
 // Metrics configures the credential-free pull metrics poller (Plane A, SSH pull-over-SSH).
@@ -78,11 +89,14 @@ type Auth struct {
 //
 // endregion STRUCT_Vault
 type Vault struct {
-	Passphrase string `yaml:"passphrase"`
+	Passphrase     string `yaml:"passphrase"`
+	PassphraseFile string `yaml:"passphrase_file"` // path to a 0600 file holding the passphrase (preferred over config.passphrase; also how systemd LoadCredential injects it)
 }
 
-// Configured reports whether the vault will arm.
-func (v Vault) Configured() bool { return strings.TrimSpace(v.Passphrase) != "" }
+// Configured reports whether the vault will arm (via passphrase or a passphrase file).
+func (v Vault) Configured() bool {
+	return strings.TrimSpace(v.Passphrase) != "" || strings.TrimSpace(v.PassphraseFile) != ""
+}
 
 // region STRUCT_AI [DOMAIN(7): Configuration; CONCEPT(8): AIProvider; TECH(7): struct]
 // @purpose LLM provider settings. Empty APIKey means AI is disabled (chat endpoint -> 503).

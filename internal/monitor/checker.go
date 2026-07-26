@@ -134,6 +134,7 @@ func num(v any) (float64, bool) {
 func DefaultRegistry() *Registry {
 	return NewRegistry(
 		&LivenessChecker{},
+		&ExposuresChecker{},
 		&TCPChecker{},
 		&HTTPChecker{},
 		&TLSChecker{},

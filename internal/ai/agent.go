@@ -50,7 +50,12 @@ func (a *Agent) systemPrompt() string {
 	}
 	return "You are VMPilot, the AI assistant for a small fleet of virtual machines. " +
 		"Use the provided tools to inspect the fleet (VMs, health, check results, alerts) and " +
-		"answer concisely. If a tool returns an error, report it plainly. Do not invent data."
+		"answer concisely. If a tool returns an error, report it plainly. Do not invent data.\n\n" +
+		"Visibility model: list_vms and get_vm_health show the WHOLE fleet (every VM's id, name, " +
+		"IP and liveness). ai_access on a VM gates only command execution and deep data " +
+		"(inventory/results) — you may target any VM's IP from a VM you have ai_access to " +
+		"(e.g. run `traceroute <other-vm-ip>` from a granted VM). To act on a VM, it must have " +
+		"ai_access=true."
 }
 
 // region FUNC_Ask [DOMAIN(9): AI; CONCEPT(8): Converse; TECH(7): loop]

@@ -18,13 +18,13 @@ func TestCompute_Matrix(t *testing.T) {
 		wantScore  int
 		wantStatus string
 	}{
-		{"all ok", []CheckStatus{{1, "tcp", StatusOK, 1}, {2, "http", StatusOK, 2}}, 100, StatusOK},
+		{"all ok", []CheckStatus{{CheckID: 1, CheckType: "tcp", Status: StatusOK, LatencyMS: 1}, {CheckID: 2, CheckType: "http", Status: StatusOK, LatencyMS: 2}}, 100, StatusOK},
 		{"one critical of four -> red", []CheckStatus{
-			{1, "tcp", StatusOK, 1}, {2, "http", StatusOK, 1}, {3, "tls", StatusOK, 1}, {4, "ping", StatusCritical, 0},
+			{CheckID: 1, CheckType: "tcp", Status: StatusOK, LatencyMS: 1}, {CheckID: 2, CheckType: "http", Status: StatusOK, LatencyMS: 1}, {CheckID: 3, CheckType: "tls", Status: StatusOK, LatencyMS: 1}, {CheckID: 4, CheckType: "ping", Status: StatusCritical, LatencyMS: 0},
 		}, 75, StatusCritical},
-		{"warn mix", []CheckStatus{{1, "tcp", StatusOK, 1}, {2, "http", StatusWarn, 1}}, 70, StatusWarn},
-		{"all pending -> unknown", []CheckStatus{{1, "tcp", "", 0}, {2, "http", "", 0}}, w.Unknown, StatusUnknown},
-		{"ok + pending -> ok", []CheckStatus{{1, "tcp", StatusOK, 1}, {2, "http", "", 0}}, (w.OK + w.Unknown) / 2, StatusOK},
+		{"warn mix", []CheckStatus{{CheckID: 1, CheckType: "tcp", Status: StatusOK, LatencyMS: 1}, {CheckID: 2, CheckType: "http", Status: StatusWarn, LatencyMS: 1}}, 70, StatusWarn},
+		{"all pending -> unknown", []CheckStatus{{CheckID: 1, CheckType: "tcp", Status: "", LatencyMS: 0}, {CheckID: 2, CheckType: "http", Status: "", LatencyMS: 0}}, w.Unknown, StatusUnknown},
+		{"ok + pending -> ok", []CheckStatus{{CheckID: 1, CheckType: "tcp", Status: StatusOK, LatencyMS: 1}, {CheckID: 2, CheckType: "http", Status: "", LatencyMS: 0}}, (w.OK + w.Unknown) / 2, StatusOK},
 		{"no checks", []CheckStatus{}, 0, StatusUnknown},
 	}
 	for _, c := range cases {
@@ -40,7 +40,7 @@ func TestCompute_Matrix(t *testing.T) {
 
 func TestCompute_DefaultsWhenZero(t *testing.T) {
 	// Zero Weights -> defaults applied (not all-critical).
-	got := Compute([]CheckStatus{{1, "tcp", StatusOK, 1}}, Weights{})
+	got := Compute([]CheckStatus{{CheckID: 1, CheckType: "tcp", Status: StatusOK, LatencyMS: 1}}, Weights{})
 	if got.Score != 100 || got.Status != StatusOK {
 		t.Fatalf("zero-value opts should fall back to defaults, got %+v", got)
 	}

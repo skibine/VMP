@@ -59,6 +59,10 @@ func main() {
 	// Re-apply configured log level for all subsequent output.
 	logger = logging.Setup(parseLevel(cfg.LogLevel), os.Stdout)
 
+	// Apply web-SSH hardening knobs (per-user session limit + idle reaper) before api.New wires the
+	// routes. Zero values keep the built-in defaults (3 sessions, 30 min idle).
+	api.SetWebSSHDefaults(cfg.Server.WebSSHSessionLimit, cfg.Server.WebSSHIdleMin)
+
 	s, err := store.Open(cfg.DBPath, logger)
 	if err != nil {
 		logging.LDD(logger, 10, "main", "STORE_FAIL", err.Error())
@@ -115,10 +119,12 @@ func main() {
 	defer eng.Stop()
 
 	// Ensure every VM has the always-on system liveness check (drives the fleet dot independently of
-	// alert config). Backfills pre-existing VMs that predate the auto-provisioning.
+	// alert config) + the periodic system exposures check (auto security scan -> alert rules).
+	// Backfills pre-existing VMs that predate the auto-provisioning.
 	if vms, err := s.ListVMs(context.Background(), true); err == nil {
 		for _, vm := range vms {
 			_ = s.EnsureSystemLiveness(context.Background(), vm.ID, vm.PortSSH)
+			_ = s.EnsureSystemExposures(context.Background(), vm.ID)
 		}
 	}
 
@@ -148,6 +154,11 @@ func main() {
 	}
 	go metrics.New(s, sshDialer, logger).WithInterval(pollInterval).Run(ctx)
 
+	// Daily SQLite backup (VACUUM INTO snapshot to <dbpath>.bak) — cheap insurance: the single
+	// file holds config, metrics and the tamper-evident audit chain. Snapshots immediately on
+	// startup, then every 24h; a corrupted/lost DB is recoverable from the last .bak.
+	go backupLoop(ctx, s, cfg.DBPath, logger, 24*time.Hour)
+
 	if err := server.Serve(ctx); err != nil {
 		logging.LDD(logger, 10, "main", "SERVE_FAIL", err.Error())
 		os.Exit(1)
@@ -171,9 +182,14 @@ func (e *sshActionExec) Execute(ctx context.Context, vmID int64, command string)
 		return "", derr
 	}
 	defer client.Close()
+	// Pass the stored sudo password so privileged commands run via `sudo -S` non-interactively.
+	var sudoPassword string
+	if creds, ok, _ := e.st.GetVMCredentials(ctx, vmID); ok {
+		sudoPassword = creds.SudoPassword
+	}
 	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return e.dialer.RunCommand(rctx, client, command)
+	return e.dialer.RunCommand(rctx, client, command, sudoPassword)
 }
 
 // region FUNC_parseLevel [DOMAIN(7): Config; CONCEPT(5): LogLevel; TECH(4): slog]
@@ -194,22 +210,51 @@ func parseLevel(s string) slog.Level {
 }
 
 // region FUNC_bootstrapAdmin [DOMAIN(9): Security; CONCEPT(7): Bootstrap; TECH(6): store,argon2]
-// @purpose Create the initial owner once, when no users exist and bootstrap creds are set.
+// @purpose Create the initial owner once, when no users exist. If no password is configured,
+//
+//	a strong random one is generated and printed ONCE to stdout (so a secret never needs to
+//	live in config.yaml). A lingering bootstrap_admin_password after first run triggers a
+//	per-startup warning to remove the stale credential from config.
+//
 // @complexity 4
+// @invariants
+//   - A generated password is printed only to stdout; it is never written to the structured log.
+//   - If users already exist, no user is created regardless of configured creds.
+//
 // endregion FUNC_bootstrapAdmin
 func bootstrapAdmin(ctx context.Context, s *store.Store, cfg *config.Config, logger *slog.Logger) {
 	user := strings.TrimSpace(cfg.Auth.BootstrapAdminUsername)
-	pass := cfg.Auth.BootstrapAdminPassword
-	if user == "" || pass == "" {
-		return
+	if user == "" {
+		user = "admin"
 	}
+	configuredPass := cfg.Auth.BootstrapAdminPassword
+
 	count, err := s.CountUsers(ctx)
 	if err != nil {
 		logging.LDD(logger, 9, "bootstrap", "COUNT_FAIL", err.Error())
 		return
 	}
 	if count > 0 {
+		// Users already exist: a leftover bootstrap password in config is a stale secret that
+		// should not linger next to the DB. Warn every startup until the operator removes it.
+		if strings.TrimSpace(configuredPass) != "" {
+			logging.LDD(logger, 9, "bootstrap", "STALE_CREDS",
+				"an admin user already exists but bootstrap_admin_password is still set in config.yaml — remove it")
+		}
 		return
+	}
+
+	// First run, no users. Prefer a generated password so no secret is stored in config at all.
+	pass := strings.TrimSpace(configuredPass)
+	generated := false
+	if pass == "" {
+		p, err := crypto.RandomPassword(24)
+		if err != nil {
+			logging.LDD(logger, 10, "bootstrap", "GEN_FAIL", err.Error())
+			return
+		}
+		pass = p
+		generated = true
 	}
 	hash, err := auth.HashPassword(pass)
 	if err != nil {
@@ -220,7 +265,47 @@ func bootstrapAdmin(ctx context.Context, s *store.Store, cfg *config.Config, log
 		logging.LDD(logger, 10, "bootstrap", "CREATE_FAIL", err.Error())
 		return
 	}
-	logging.LDD(logger, 9, "bootstrap", "CREATED", "owner="+user+" (remove bootstrap creds from config now)")
+	if generated {
+		// Printed to stdout (not the logger) so the secret lands in the console/journal once and
+		// the operator captures it; the structured log only records that it was printed.
+		fmt.Printf("\n=== VMPulse first-run bootstrap ===\n  username: %s\n  password: %s\n  >>> CHANGE THIS PASSWORD AFTER FIRST LOGIN <<<\n======================================\n\n", user, pass)
+		logging.LDD(logger, 9, "bootstrap", "CREATED", "owner="+user+" generated password printed to stdout (change after first login)")
+	} else {
+		logging.LDD(logger, 9, "bootstrap", "CREATED", "owner="+user+" (password taken from config — remove bootstrap_admin_password from config.yaml now)")
+	}
+}
+
+// region FUNC_backupLoop [DOMAIN(8): Storage; CONCEPT(7): Backup; TECH(7): goroutine,ticker]
+// @purpose Snapshot the database to <dbpath>.bak immediately on startup and then every "every",
+//
+//	so the last good copy is always recoverable. VACUUM INTO refuses to overwrite, so the
+//	previous .bak is removed before each snapshot. Returns when ctx is cancelled.
+//
+// @complexity 4
+// endregion FUNC_backupLoop
+func backupLoop(ctx context.Context, s *store.Store, dbPath string, logger *slog.Logger, every time.Duration) {
+	dest := dbPath + ".bak"
+	run := func() {
+		_ = os.Remove(dest) // VACUUM INTO fails if the destination already exists.
+		if err := s.Backup(ctx, dest); err != nil {
+			logging.LDD(logger, 9, "backupLoop", "FAIL", err.Error())
+			return
+		}
+		if info, err := os.Stat(dest); err == nil {
+			logging.LDD(logger, 7, "backupLoop", "DONE", fmt.Sprintf("dest=%s size=%d", dest, info.Size()))
+		}
+	}
+	run() // immediate first snapshot so a backup exists before the first 24h tick.
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			run()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // region FUNC_armVault [DOMAIN(9): Security; CONCEPT(7): AtRestKey; TECH(7): argon2id,config_meta]
@@ -266,13 +351,18 @@ func armVault(ctx context.Context, s *store.Store, cfg *config.Config, logger *s
 	switch {
 	case ask:
 		src = "prompt"
+	case cfg.VaultFromFile:
+		src = "file (" + strings.TrimSpace(cfg.Vault.PassphraseFile) + ")"
 	case cfg.VaultFromConfig:
-		src = "config.yaml (WARNING: prefer --ask-passphrase or VMPULSE_VAULT_PASSPHRASE)"
+		src = "config.yaml (WARNING: prefer --ask-passphrase, VMPULSE_VAULT_PASSPHRASE, or vault.passphrase_file)"
 	}
 	logging.LDD(logger, 9, "main", "VAULT_ARMED", "at-rest encryption enabled (source="+src+")")
 }
 
-// resolvePassphrase picks the master passphrase: prompt > env > config (lowest priority).
+// resolvePassphrase picks the master passphrase. Priority:
+// prompt (--ask-passphrase) > env (VMPULSE_VAULT_PASSPHRASE) > passphrase_file (0600 file; also
+// how systemd LoadCredential exposes the credential) > config.yaml passphrase (lowest, WARNED).
+// cfg.VaultFromConfig is set ONLY when the resolved passphrase came from config.yaml on disk.
 func resolvePassphrase(cfg *config.Config, ask bool, logger *slog.Logger) string {
 	if ask {
 		fmt.Fprint(os.Stderr, "vault master passphrase: ")
@@ -286,6 +376,21 @@ func resolvePassphrase(cfg *config.Config, ask bool, logger *slog.Logger) string
 	}
 	if env := os.Getenv("VMPULSE_VAULT_PASSPHRASE"); env != "" {
 		return env
+	}
+	// Passphrase file: read once at startup (trimmed of trailing newline). Preferred over
+	// config.yaml because the file can live at 0600 outside the repo / be injected by systemd
+	// (LoadCredential= makes it appear under $CREDENTIALS_DIRECTORY).
+	if path := strings.TrimSpace(cfg.Vault.PassphraseFile); path != "" {
+		// Expand env (e.g. $CREDENTIALS_DIRECTORY) so systemd LoadCredential= works: the unit sets
+		// LoadCredential=vault.pass:... and the file appears under $CREDENTIALS_DIRECTORY/vault.pass.
+		path = os.ExpandEnv(path)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			logging.LDD(logger, 10, "main", "VAULT_FILE_READ_FAIL", path+": "+err.Error())
+			return ""
+		}
+		cfg.VaultFromFile = true
+		return strings.TrimSpace(string(b))
 	}
 	cfg.VaultFromConfig = cfg.Vault.Configured()
 	return cfg.Vault.Passphrase

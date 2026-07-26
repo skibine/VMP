@@ -21,6 +21,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"nhooyr.io/websocket"
 
@@ -31,15 +33,69 @@ import (
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
+// web-SSH hardening knobs (the terminal is full fleet access, so it is the most dangerous surface).
+// Defaults applied in registerWebSSH; main.go overrides them from config via SetWebSSHDefaults
+// before api.New wires the routes.
+var (
+	webSSHSessionLimit = 3                   // max concurrent interactive terminals per user
+	webSSHIdleTimeout  = 30 * time.Minute    // idle reaper; mirrored onto the ssh.Dialer
+)
+
+// SetWebSSHDefaults overrides the web-SSH session limit and idle timeout from config. No-op for
+// zero values (keeps the built-in default). Call once at startup, before api.New.
+func SetWebSSHDefaults(sessionLimit, idleMin int) {
+	if sessionLimit > 0 {
+		webSSHSessionLimit = sessionLimit
+	}
+	if idleMin > 0 {
+		webSSHIdleTimeout = time.Duration(idleMin) * time.Minute
+	}
+}
+
+// sessionRegistry tracks how many interactive web-SSH terminals a user has open at once so a single
+// account can't open an unbounded number (each terminal is full fleet access). Counted per-userID.
+type sessionRegistry struct {
+	mu    sync.Mutex
+	count map[int64]int
+}
+
+func newSessionRegistry() *sessionRegistry { return &sessionRegistry{count: make(map[int64]int)} }
+
+// acquire reserves a slot for the user; ok=false if the per-user limit is reached.
+func (r *sessionRegistry) acquire(userID int64, limit int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit > 0 && r.count[userID] >= limit {
+		return false
+	}
+	r.count[userID]++
+	return true
+}
+
+// release frees a slot. Guarded so a double-release can't drop the count below zero.
+func (r *sessionRegistry) release(userID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.count[userID] > 0 {
+		r.count[userID]--
+		if r.count[userID] == 0 {
+			delete(r.count, userID)
+		}
+	}
+}
+
 type websshAPI struct {
-	st     *store.Store
-	dialer *ssh.Dialer
-	logger *slog.Logger
+	st       *store.Store
+	dialer   *ssh.Dialer
+	logger   *slog.Logger
+	sessions *sessionRegistry
 }
 
 // registerWebSSH attaches the Plane-B SSH routes (terminal / snapshot / hostkey reset) to the mux.
 func registerWebSSH(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
-	a := &websshAPI{st: st, dialer: ssh.New(st, logger), logger: logger}
+	d := ssh.New(st, logger)
+	d.IdleTimeout = webSSHIdleTimeout // mirror the configured idle reaper onto the dialer
+	a := &websshAPI{st: st, dialer: d, logger: logger, sessions: newSessionRegistry()}
 	mux.HandleFunc("GET /api/vms/{id}/terminal", a.handleTerminal)
 	mux.HandleFunc("POST /api/vms/{id}/snapshot", a.handleSnapshot)
 	mux.HandleFunc("DELETE /api/vms/{id}/hostkey", a.handleResetHostKey)
@@ -59,6 +115,15 @@ func (a *websshAPI) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.CloseNow()
+
+	// Per-user concurrent session limit: each terminal is full fleet access, so cap how many a
+	// single account can hold open (default 3). Reject the excess with a machine-readable reason.
+	if !a.sessions.acquire(userID, webSSHSessionLimit) {
+		writeWSClose(c, r.Context(), map[string]string{"error": "too_many_sessions", "detail": "session limit reached — close another terminal first"})
+		logging.LDD(a.logger, 9, "handleTerminal", "LIMITED", "user="+strconv.FormatInt(userID, 10))
+		return
+	}
+	defer a.sessions.release(userID)
 
 	// Initial pty size from query (?rows=&cols=), sane defaults.
 	rows, cols := 24, 80

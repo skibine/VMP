@@ -30,6 +30,10 @@ func registerSettings(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/settings/ai", a.getAISettings)
 	mux.HandleFunc("PUT /api/settings/ai", a.updateAISettings)
 
+	// AI model discovery: provider /models proxy + localhost LLM detection.
+	mux.HandleFunc("GET /api/ai/models", a.aiModels)
+	mux.HandleFunc("GET /api/ai/probe-local", a.probeLocalAI)
+
 	mux.HandleFunc("GET /api/vms/{id}/credentials", a.getVMCreds)
 	mux.HandleFunc("GET /api/vms/{id}/inventory", a.vmInventory)
 	mux.HandleFunc("POST /api/vms/{id}/inventory/refresh", a.refreshInventory)
@@ -96,9 +100,10 @@ func (a *crudAPI) getVMCreds(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "getVMCreds", err)
 		return
 	}
-	resp := map[string]any{"has_secret": false, "ssh_user": "", "auth_type": ""}
+	resp := map[string]any{"has_secret": false, "has_sudo": false, "ssh_user": "", "auth_type": ""}
 	if has {
 		resp["has_secret"] = creds.Secret != ""
+		resp["has_sudo"] = creds.SudoPassword != ""
 		resp["ssh_user"] = creds.SSHUser
 		resp["auth_type"] = creds.AuthType
 		// Surface the persisted inventory so the "system // profile" block survives navigation.
@@ -173,13 +178,15 @@ func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {
 		AuthType      string `json:"auth_type"`
 		Secret        string `json:"secret"`
 		KeyPassphrase string `json:"key_passphrase"`
+		SudoPassword  string `json:"sudo_password"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 
-	// Preserve the existing secret/passphrase when the request omits them (so the user can change
-	// only the ssh_user/auth_type without re-pasting the key every time).
+	// Preserve the existing secret/passphrase/sudo when the request omits them (so the user can
+	// change only the ssh_user/auth_type without re-pasting the key every time). Sudo password is
+	// preserved unless the operator explicitly clears it via a dedicated clear endpoint/flag.
 	cur, has, _ := a.st.GetVMCredentials(r.Context(), id)
 	secret := body.Secret
 	if secret == "" && has {
@@ -189,8 +196,13 @@ func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {
 	if pass == "" && has && body.Secret == "" {
 		pass = cur.KeyPassphrase
 	}
+	sudo := body.SudoPassword
+	if sudo == "" && has {
+		sudo = cur.SudoPassword // sudo is orthogonal to the SSH key: preserve unless explicitly changed
+	}
 	if err := a.st.SetVMCredentials(r.Context(), store.VMCredentials{
-		VMID: id, SSHUser: body.SSHUser, AuthType: body.AuthType, Secret: secret, KeyPassphrase: pass,
+		VMID: id, SSHUser: body.SSHUser, AuthType: body.AuthType, Secret: secret,
+		KeyPassphrase: pass, SudoPassword: sudo,
 	}); err != nil {
 		a.writeErr(w, "setVMCreds", err)
 		return

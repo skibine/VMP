@@ -56,6 +56,7 @@ type CheckStatus struct {
 	CheckType string  `json:"check_type"`
 	Status    string  `json:"status"`
 	LatencyMS float64 `json:"latency_ms"`
+	Message   string  `json:"message"`
 }
 
 // region STRUCT_Score [DOMAIN(7): Health; CONCEPT(7): Output; TECH(5): struct]

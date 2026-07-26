@@ -26,6 +26,8 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
 	mux.HandleFunc("GET /api/vms/{id}/portscan", a.portScanVM)
+	mux.HandleFunc("GET /api/vms/{id}/exposures", a.exposuresVM)
+	mux.HandleFunc("POST /api/exposures/scan-all", a.exposuresScanAll)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
 	mux.HandleFunc("GET /api/vms/{id}/errors", a.errorsVM)
 	mux.HandleFunc("GET /api/vms/{id}/updates", a.updatesVM)
@@ -111,6 +113,69 @@ func (a *crudAPI) portScanVM(w http.ResponseWriter, r *http.Request) {
 	}
 	ports := monitor.PortScan(r.Context(), host, 8*time.Second)
 	writeJSON(w, http.StatusOK, map[string]any{"host": host, "ports": ports})
+}
+
+// exposuresVM runs the curated exposure scan (protocol-aware, credential-free) against the VM's
+// public IP — confirms exploitable exposure (Redis +PONG, Docker /version, .git/.env, weak TLS...).
+func (a *crudAPI) exposuresVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	vm, err := a.st.GetVM(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "exposuresVM", err)
+		return
+	}
+	host := vm.IP
+	if host == "" {
+		host = vm.Hostname
+	}
+	if host == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "vm has no host/IP to scan"})
+		return
+	}
+	findings := monitor.Exposures(r.Context(), host, 12*time.Second)
+	v := monitor.ExposuresVerdict(findings)
+	// Persist + propagate to ALL VMs sharing this host (target = ip/hostname). Probing the same host
+	// yields the same result, so scanning one VM on a shared host clears the alert for the rest too —
+	// not just the viewed VM. exceptVMID=0 so the source VM is updated as well.
+	a.st.PropagateExposuresResult(r.Context(), 0, host, string(v.Status), v.Message, v.Detail)
+	writeJSON(w, http.StatusOK, map[string]any{"host": host, "findings": findings})
+}
+
+// exposuresScanAll re-scans exposures for every unique host in the fleet and propagates each result
+// to all VMs on that host. Use after fixing a server-wide issue: one click clears stale alerts
+// fleet-wide instead of waiting for each VM's periodic cycle (or opening each one).
+func (a *crudAPI) exposuresScanAll(w http.ResponseWriter, r *http.Request) {
+	vms, err := a.st.ListVMs(r.Context(), false)
+	if err != nil {
+		a.writeErr(w, "exposuresScanAll", err)
+		return
+	}
+	// Deduplicate by scan target (ip, falling back to hostname) — one probe per host, not per VM.
+	seen := map[string]bool{}
+	var hosts []string
+	for _, vm := range vms {
+		t := vm.IP
+		if t == "" {
+			t = vm.Hostname
+		}
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		hosts = append(hosts, t)
+	}
+	ctx := r.Context()
+	totalFindings := 0
+	for _, host := range hosts {
+		findings := monitor.Exposures(ctx, host, 12*time.Second)
+		v := monitor.ExposuresVerdict(findings)
+		a.st.PropagateExposuresResult(ctx, 0, host, string(v.Status), v.Message, v.Detail)
+		totalFindings += len(findings)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hosts_scanned": len(hosts), "findings": totalFindings})
 }
 
 // ipInfoVM returns the geo/ASN/PTR info for the VM's public IP (Plane A, keyless).

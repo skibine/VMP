@@ -70,7 +70,7 @@ func (a *crudAPI) vmHealth(w http.ResponseWriter, r *http.Request) {
 		}
 		checks = append(checks, health.CheckStatus{
 			CheckID: row.CheckID, CheckType: row.CheckType,
-			Status: row.LatestStatus, LatencyMS: row.LatestLatency,
+			Status: row.LatestStatus, LatencyMS: row.LatestLatency, Message: row.LatestMessage,
 		})
 	}
 	score := health.Compute(checks, health.DefaultWeights())

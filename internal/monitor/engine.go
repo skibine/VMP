@@ -189,7 +189,15 @@ func (e *Engine) worker() {
 // @purpose Delegate a scheduled check to the shared executor.
 // endregion FUNC_runCheck
 func (e *Engine) runCheck(c store.Check) {
-	_, _ = ExecuteCheck(e.ctx, e.store, e.reg, e.logger, c)
+	res, _ := ExecuteCheck(e.ctx, e.store, e.reg, e.logger, c)
+	// Exposures scans are per-host (target = the VM's ip/hostname), so the same probe result applies
+	// to every VM on that host. Propagate so a periodic scan of one VM clears/sets the alert for all
+	// VMs sharing the target — not just the one whose turn it was to run.
+	if c.CheckType == "exposures" && c.VMID != nil {
+		if target, err := resolveTarget(e.ctx, e.store, c); err == nil && target != "" {
+			_, _ = e.store.PropagateExposuresResult(e.ctx, *c.VMID, target, string(res.Status), res.Message, res.Detail)
+		}
+	}
 }
 
 // region FUNC_ExecuteCheck [DOMAIN(8): Monitoring; CONCEPT(8): Execute; TECH(7): Checker]
