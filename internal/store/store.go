@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -142,7 +143,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 		if applied {
 			continue
 		}
-		body, rerr := migrationFS.ReadFile(filepath.Join("migrations", name))
+		body, rerr := migrationFS.ReadFile(path.Join("migrations", name))
 		if rerr != nil {
 			return fmt.Errorf("read %s: %w", name, rerr)
 		}
