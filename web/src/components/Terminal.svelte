@@ -7,6 +7,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
   import { terminalUrl } from '../lib/api.js'
+  import { t } from '../lib/i18n.js'
 
   export let vmId
   const dispatch = createEventDispatcher()
@@ -80,7 +81,7 @@
 </script>
 
 <div class="terminal-wrap">
-  <div class="tbar"><span class="dot {status}"></span> ssh terminal — {status}</div>
+  <div class="tbar"><span class="dot {status}"></span> {$t('term.title', { status: $t('term.' + status) })}</div>
   <div class="term" bind:this={el}></div>
 </div>
 

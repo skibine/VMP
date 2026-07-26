@@ -10,7 +10,9 @@ async function req(path, { method = 'GET', body, auth = true } = {}) {
     unsub()
     if (t) headers.Authorization = 'Bearer ' + t
   }
-  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  // cache: 'no-store' — API responses must NEVER be served from browser cache, otherwise list
+  // changes (add/delete/archive) only appear after a hard refresh (the matrix/sidebar went stale).
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
   if (res.status === 401 && auth) {
     logout()
     throw new Error('unauthorized')
@@ -60,6 +62,8 @@ export const api = {
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
   portScan: (id) => req('/api/vms/' + id + '/portscan'),
+  exposures: (id) => req('/api/vms/' + id + '/exposures'),
+  exposuresScanAll: () => req('/api/exposures/scan-all', { method: 'POST' }),
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),
   vmErrors: (id, range) => req('/api/vms/' + id + '/errors?range=' + (range || '24h')),
   vmUpdates: (id) => req('/api/vms/' + id + '/updates'),
@@ -82,6 +86,9 @@ export const api = {
   // Settings
   getAISettings: () => req('/api/settings/ai'),
   updateAISettings: (cfg) => req('/api/settings/ai', { method: 'PUT', body: cfg }),
+  // AI model discovery: provider /models list + localhost LLM detection.
+  aiModels: () => req('/api/ai/models'),
+  probeLocalAI: () => req('/api/ai/probe-local'),
   getVMCreds: (id) => req('/api/vms/' + id + '/credentials'),
   setVMCreds: (id, creds) => req('/api/vms/' + id + '/credentials', { method: 'PUT', body: creds }),
   deleteVMCreds: (id) => req('/api/vms/' + id + '/credentials', { method: 'DELETE' }),

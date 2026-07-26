@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js'
-  import { onMount, onDestroy } from 'svelte'
+  import { t } from '../lib/i18n.js'
+  import { onMount, onDestroy, afterUpdate } from 'svelte'
   import ArtifactRenderer from './ArtifactRenderer.svelte'
 
   // region ChatPanel [DOMAIN(8): AI; CONCEPT(8]: Copilot; TECH(6]: svelte]
@@ -9,6 +10,20 @@
   let input = ''
   let busy = false
   let messages = [] // {role, text, artifact, trace}
+
+  // Stick-to-bottom autoscroll. `stick` tracks whether the user is parked at the bottom, set by the
+  // scroll EVENT (user-driven), NOT re-measured after content grows. Measuring nearBottom AFTER a
+  // large reply / approval block lands makes it falsely false (scrollHeight already grew) and skips
+  // the scroll — the classic autoscroll bug. So we remember "was the user at the bottom?" and
+  // re-apply scrollTop=scrollHeight on every update while stick is true. Scrolling up clears stick,
+  // so reading history is never interrupted.
+  let scroller = null
+  let stick = true
+  function onScrollerScroll() {
+    if (!scroller) return
+    stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120
+  }
+  afterUpdate(() => { if (stick && scroller) scroller.scrollTop = scroller.scrollHeight })
 
   // Persist chat to localStorage so it survives reloads (history is in-memory on the server side too).
   const STORE_KEY = 'vmp_chat'
@@ -33,7 +48,10 @@
   let actionBusy = {} // id -> true while approving/rejecting
   let pollTimer = null
 
-  onMount(() => { refreshPending(); pollTimer = setInterval(refreshPending, 4000) })
+  onMount(() => {
+    refreshPending()
+    pollTimer = setInterval(refreshPending, 2000)
+  })
   onDestroy(() => { if (pollTimer) clearInterval(pollTimer) })
 
   async function refreshPending() {
@@ -132,16 +150,16 @@
       <span class="relative inline-flex rounded-full h-2 w-2 bg-neon-cyan"></span>
     </span>
     <span class="hud-label text-neon-cyan">vmpilot</span>
-    <span class="hud-label text-hud-dim ml-2">ctx: last 8 turns</span>
+    <span class="hud-label text-hud-dim ml-2">{$t('chat.ctx')}</span>
     {#if messages.length}
-      <button class="hud-btn !py-0.5 !text-xs ml-auto" on:click={clearChat} title="clear chat">clear</button>
+      <button class="hud-btn !py-0.5 !text-xs ml-auto" on:click={clearChat} title="clear chat">{$t('chat.clear')}</button>
     {/if}
   </div>
 
-  <div class="flex-1 overflow-auto p-3 space-y-3">
+  <div bind:this={scroller} on:scroll={onScrollerScroll} class="flex-1 overflow-auto p-3 space-y-3">
     {#if !messages.length}
       <div class="hud-panel p-3 text-xs text-hud-dim space-y-2">
-        <div class="hud-label">// hints</div>
+        <div class="hud-label">{$t('chat.hints')}</div>
         <p>· "какие у меня ВМ и их здоровье?"</p>
         <p>· "покажи последние алерты"</p>
         <p>· "проверь состояние vm 1"</p>
@@ -149,7 +167,7 @@
     {/if}
     {#each messages as m}
       <div class="space-y-1">
-        <div class="hud-label">{m.synthetic ? '⟳ action result' : m.role === 'user' ? '> you' : '< vmpilot'}</div>
+        <div class="hud-label">{m.synthetic ? $t('chat.actionResult') : m.role === 'user' ? $t('chat.you') : '< vmpilot'}</div>
         {#if m.text}
           <div
             class="text-sm whitespace-pre-wrap {m.synthetic
@@ -166,7 +184,7 @@
         {/if}
         {#if m.trace?.length}
           <details class="text-[11px] font-mono border border-hud-line rounded mt-1">
-            <summary class="hud-label text-hud-dim cursor-pointer px-2 py-0.5">activity ({m.trace.length})</summary>
+            <summary class="hud-label text-hud-dim cursor-pointer px-2 py-0.5">{$t('chat.activity', { n: m.trace.length })}</summary>
             <div class="px-2 py-1 space-y-0.5">
               {#each m.trace as t}
                 <div class="text-hud-dim"><span class="text-neon-cyan">▸ {t.tool}</span> <span class="text-emerald-200/60 break-all">{t.args}</span> <span class="text-hud-dim">→ {t.result}</span></div>
@@ -177,21 +195,21 @@
       </div>
     {/each}
     {#if busy}
-      <div class="hud-label animate-pulse">vmpilot thinking…</div>
+      <div class="hud-label animate-pulse">{$t('chat.thinking')}</div>
     {/if}
     {#if pending.length}
       <div class="space-y-2 pt-2">
-        <div class="hud-label text-neon-amber">// pending actions ({pending.length}) — approve to execute</div>
+        <div class="hud-label text-neon-amber">{$t('chat.pending', { n: pending.length })}</div>
         {#each pending as a (a.id)}
           <div class="hud-panel p-2 space-y-1 border-neon-amber/40">
-            <div class="text-xs font-mono break-all"><span class="hud-label text-hud-dim">vm {a.vm_id}:</span> <span class="text-emerald-200/90">{a.command}</span></div>
-            {#if a.reason}<div class="text-[11px] font-mono text-hud-dim">why: {a.reason}</div>{/if}
+            <div class="text-xs font-mono break-all"><span class="hud-label text-hud-dim">{$t('chat.vm', { id: a.vm_id })}</span> <span class="text-emerald-200/90">{a.command}</span></div>
+            {#if a.reason}<div class="text-[11px] font-mono text-hud-dim">{$t('chat.why')} {a.reason}</div>{/if}
             {#if a._done && a._result}
               <div class="text-[11px] font-mono whitespace-pre-wrap {a._result.status === 'done' ? 'text-neon-green' : 'text-neon-red'}">{a._result.status === 'done' ? '✓ ' : '✗ '}{a._result.output || a._result.error || ''}</div>
             {:else}
               <div class="flex items-center gap-2">
-                <button class="hud-btn hud-btn-primary !py-0.5 !text-xs" on:click={() => approve(a)} disabled={actionBusy[a.id]}>{actionBusy[a.id] ? '…' : '✓ approve'}</button>
-                <button class="hud-btn !py-0.5 !text-xs" on:click={() => reject(a)} disabled={actionBusy[a.id]}>✕ reject</button>
+                <button class="hud-btn hud-btn-primary !py-0.5 !text-xs" on:click={() => approve(a)} disabled={actionBusy[a.id]}>{actionBusy[a.id] ? '…' : $t('chat.approve')}</button>
+                <button class="hud-btn !py-0.5 !text-xs" on:click={() => reject(a)} disabled={actionBusy[a.id]}>{$t('chat.reject')}</button>
               </div>
             {/if}
           </div>
@@ -204,7 +222,7 @@
     <textarea
       class="hud-input resize-none"
       rows="2"
-      placeholder="ask vmpilot… (enter to send)"
+      placeholder={$t('chat.placeholder')}
       bind:value={input}
       on:keydown={onKey}
     ></textarea>

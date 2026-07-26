@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte'
   import { api } from '../lib/api.js'
+  import { t } from '../lib/i18n.js'
 
   const dispatch = createEventDispatcher()
 
@@ -35,19 +36,19 @@
 <form on:submit|preventDefault={submit} class="space-y-3">
   <div class="grid grid-cols-2 gap-3">
     <label class="block space-y-1">
-      <span class="hud-label">name</span>
+      <span class="hud-label">{$t('addvm.name')}</span>
       <input class="hud-input" bind:value={name} placeholder="web-1" />
     </label>
     <label class="block space-y-1">
-      <span class="hud-label">hostname</span>
+      <span class="hud-label">{$t('addvm.hostname')}</span>
       <input class="hud-input" bind:value={hostname} placeholder="host or ip" />
     </label>
     <label class="block space-y-1">
-      <span class="hud-label">ip</span>
+      <span class="hud-label">{$t('addvm.ip')}</span>
       <input class="hud-input" bind:value={ip} placeholder="10.0.0.1" />
     </label>
     <label class="block space-y-1">
-      <span class="hud-label">ssh port</span>
+      <span class="hud-label">{$t('addvm.sshPort')}</span>
       <input class="hud-input font-mono" type="number" bind:value={port} />
     </label>
   </div>
@@ -57,6 +58,6 @@
     </div>
   {/if}
   <button class="hud-btn hud-btn-primary w-full" disabled={busy}>
-    {busy ? 'deploying…' : 'add vm'}
+    {busy ? $t('addvm.deploying') : $t('addvm.submit')}
   </button>
 </form>

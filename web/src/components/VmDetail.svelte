@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
+  import { t } from '../lib/i18n.js'
   import Terminal from './Terminal.svelte'
   import MetricsChart from './MetricsChart.svelte'
 
@@ -23,7 +24,7 @@
   let editMode = false
   let edit = { name: '', hostname: '', ip: '', port_ssh: 22, tags: '', notes: '' }
   let editMsg = ''
-  let cred = { ssh_user: '', auth_type: 'password', has_secret: false, secret: '', key_passphrase: '', msg: '', ok: false, busy: false }
+  let cred = { ssh_user: '', auth_type: 'password', has_secret: false, has_sudo: false, secret: '', key_passphrase: '', sudo_password: '', msg: '', ok: false, busy: false }
   let validate = { kind: '', detail: '' }
   let system = null // inventory from cred-save probe
 
@@ -36,6 +37,7 @@
 
   // External port scan (common ports) — Plane A, no creds. Auto-runs on select.
   let portscan = { ports: [], busy: false, err: '' }
+  let exposures = { findings: [], busy: false, err: '' }
 
   // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
   let ipinfo = { data: null, busy: false, err: '' }
@@ -64,6 +66,17 @@
   let showTerm = false
   let termKey = 0
   let termNote = { msg: '', kind: '' }
+
+  // Switching VMs must tear down any open terminal: the Terminal's WebSocket URL is bound to the
+  // PREVIOUS vmId at mount time, so without this the old SSH session leaks server-side (each switch
+  // spawns a new one — that's what blew past the per-user session limit) and stale output shows on
+  // the new VM. Closing showTerm unmounts Terminal -> onDestroy -> ws.close().
+  let prevVmId = null
+  $: if (vmId != null && vmId !== prevVmId) {
+    prevVmId = vmId
+    showTerm = false
+    termKey++
+  }
 
   // Metrics history (pull-poller) + sparklines.
   let metricsRange = '1h'
@@ -114,6 +127,21 @@
     } catch (e) {
       if (id !== vmId) return
       portscan = { ports: [], busy: false, err: e.message }
+    }
+  }
+
+  async function loadExposures(id) {
+    exposures = { findings: [], busy: true, err: '' }
+    try {
+      const d = await api.exposures(id)
+      if (id !== vmId) return
+      exposures = { findings: d.findings || [], busy: false, err: '' }
+      // The endpoint persists the verdict into the exposures system check; refetch health so the
+      // header verdict + card reflect the fresh scan immediately (not the 6h periodic cadence).
+      api.vmHealth(id).then((h) => { if (id === vmId) health = h }).catch(() => {})
+    } catch (e) {
+      if (id !== vmId) return
+      exposures = { findings: [], busy: false, err: e.message }
     }
   }
 
@@ -242,7 +270,7 @@
       health = h
       results = r || []
       checks = c || []
-      cred = { ssh_user: cr.ssh_user || '', auth_type: cr.auth_type || 'password', has_secret: !!cr.has_secret, secret: '', msg: '', ok: false, busy: false }
+      cred = { ssh_user: cr.ssh_user || '', auth_type: cr.auth_type || 'password', has_secret: !!cr.has_secret, has_sudo: !!cr.has_sudo, secret: '', sudo_password: '', msg: '', ok: false, busy: false }
       system = cr.inventory || null
       if (v) {
         edit = { name: v.name, hostname: v.hostname, ip: v.ip, port_ssh: v.port_ssh, tags: (v.tags || []).join(', '), notes: v.notes || '' }
@@ -265,8 +293,13 @@
   $: headerColor = headerVerdict === 'up' ? 'neon-green' : headerVerdict === 'down' ? 'neon-red' : 'hud-dim'
   $: healthReason = (() => {
     if (!health || health.status === 'ok') return ''
-    const bad = (health.breakdown || []).find((b) => b.status && b.status !== 'ok')
-    return bad ? `${bad.check_type} ${bad.status}` : health.status
+    const rank = { critical: 3, warn: 2, unknown: 1 }
+    const bad = (health.breakdown || [])
+      .filter((b) => b.status && b.status !== 'ok')
+      .sort((a, b) => (rank[b.status] || 0) - (rank[a.status] || 0))[0]
+    if (!bad) return health.status
+    // Actionable: the check's own message (e.g. ".git repository exposed"), not "exposures warn".
+    return bad.message || `${bad.check_type} ${bad.status}`
   })()
 
   async function runDiag() {
@@ -374,10 +407,10 @@
   async function saveCred() {
     cred.busy = true; cred.msg = ''; validate = { kind: '', detail: '' }
     try {
-      const res = await api.setVMCreds(vmId, { ssh_user: cred.ssh_user, auth_type: cred.auth_type, secret: cred.secret, key_passphrase: cred.key_passphrase })
-      cred.secret = ''; cred.key_passphrase = ''
+      const res = await api.setVMCreds(vmId, { ssh_user: cred.ssh_user, auth_type: cred.auth_type, secret: cred.secret, key_passphrase: cred.key_passphrase, sudo_password: cred.sudo_password })
+      cred.secret = ''; cred.key_passphrase = ''; cred.sudo_password = ''
       const fresh = await api.getVMCreds(vmId)
-      cred.has_secret = !!fresh.has_secret; cred.ssh_user = fresh.ssh_user; cred.auth_type = fresh.auth_type
+      cred.has_secret = !!fresh.has_secret; cred.has_sudo = !!fresh.has_sudo; cred.ssh_user = fresh.ssh_user; cred.auth_type = fresh.auth_type
       if (res && res.validated) {
         cred.msg = 'saved ✓ connected'; cred.ok = true
         if (res.inventory) system = res.inventory
@@ -489,24 +522,24 @@
 
 <div class="h-full overflow-auto p-4 space-y-4">
   {#if loading}
-    <div class="hud-label animate-pulse">loading vm…</div>
+    <div class="hud-label animate-pulse">{$t('g.loading')}</div>
   {:else if !vm}
     <div class="hud-panel p-6 text-center">
-      {#if err}<div class="hud-label text-neon-red mb-1">load error</div><p class="text-xs text-neon-red font-mono">{err}</p>{:else}<div class="hud-label mb-1">no vm selected</div><p class="text-xs text-hud-dim">Pick a VM from the list.</p>{/if}
+      {#if err}<div class="hud-label text-neon-red mb-1">load error</div><p class="text-xs text-neon-red font-mono">{err}</p>{:else}<div class="hud-label mb-1">no vm selected</div><p class="text-xs text-hud-dim">{$t('list.empty')}</p>{/if}
     </div>
   {:else}
     <!-- Header: name + health in words -->
     <div class="hud-panel p-4">
       <div class="flex items-center gap-2">
         <h2 class="font-mono text-neon-green text-lg truncate">{vm.name}</h2>
-        <span class="hud-label text-{headerColor} ml-auto uppercase">{headerVerdict}</span>
+        <span class="hud-label text-{headerColor} ml-auto uppercase">{headerVerdict === 'up' ? $t('vd.up') : headerVerdict === 'down' ? $t('vd.down') : headerVerdict}</span>
       </div>
       <div class="text-xs text-hud-dim font-mono mt-1">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</div>
-      {#if !livenessUp && !battery.busy && battery.probes.length}<div class="text-[11px] font-mono text-neon-red mt-0.5">unreachable — no ping, no open ports</div>{/if}
-      {#if livenessUp && healthReason}<div class="text-[11px] font-mono text-neon-amber mt-0.5">service: {healthReason} (box is up)</div>{/if}
-      {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as t}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{t}</span>{/each}<span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{:else}<div class="mt-2"><span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">ai:{vm.ai_enabled ? 'on' : 'off'}</span></div>{/if}
+      {#if !livenessUp && !battery.busy && battery.probes.length}<div class="text-[11px] font-mono text-neon-red mt-0.5">{$t('vd.unreachable')}</div>{/if}
+      {#if livenessUp && healthReason}<div class="text-[11px] font-mono text-neon-amber mt-0.5">{$t('vd.serviceUp', { reason: healthReason })}</div>{/if}
+      {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as tag}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{tag}</span>{/each}<span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span></div>{:else}<div class="mt-2"><span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span></div>{/if}
       <div class="flex items-center gap-2 mt-3">
-        <button class="hud-btn" on:click={() => (editMode = !editMode)}>{editMode ? '✕ close' : '⚙ edit'}</button>
+        <button class="hud-btn" on:click={() => (editMode = !editMode)}>{editMode ? $t('g.close') : $t('vd.edit')}</button>
       </div>
     </div>
 
@@ -514,26 +547,26 @@
     {#if editMode}
       <section class="hud-panel p-4 space-y-4">
         <div>
-          <div class="hud-label text-neon-cyan mb-2">vm fields</div>
+          <div class="hud-label text-neon-cyan mb-2">{$t('vd.vmFields')}</div>
           <div class="grid grid-cols-2 gap-3">
-            <label class="block space-y-1"><span class="hud-label">name</span><input class="hud-input" bind:value={edit.name} /></label>
-            <label class="block space-y-1"><span class="hud-label">hostname</span><input class="hud-input" bind:value={edit.hostname} /></label>
-            <label class="block space-y-1"><span class="hud-label">ip</span><input class="hud-input" bind:value={edit.ip} /></label>
-            <label class="block space-y-1"><span class="hud-label">ssh port</span><input class="hud-input font-mono" type="number" bind:value={edit.port_ssh} /></label>
-            <label class="block space-y-1 col-span-2"><span class="hud-label">tags (comma-separated)</span><input class="hud-input" bind:value={edit.tags} /></label>
-            <label class="block space-y-1 col-span-2"><span class="hud-label">notes</span><textarea class="hud-input resize-none" rows="2" bind:value={edit.notes}></textarea></label>
+            <label class="block space-y-1"><span class="hud-label">{$t('vd.name')}</span><input class="hud-input" bind:value={edit.name} /></label>
+            <label class="block space-y-1"><span class="hud-label">{$t('vd.hostname')}</span><input class="hud-input" bind:value={edit.hostname} /></label>
+            <label class="block space-y-1"><span class="hud-label">{$t('vd.ip')}</span><input class="hud-input" bind:value={edit.ip} /></label>
+            <label class="block space-y-1"><span class="hud-label">{$t('vd.sshPort')}</span><input class="hud-input font-mono" type="number" bind:value={edit.port_ssh} /></label>
+            <label class="block space-y-1 col-span-2"><span class="hud-label">{$t('vd.tags')}</span><input class="hud-input" bind:value={edit.tags} /></label>
+            <label class="block space-y-1 col-span-2"><span class="hud-label">{$t('vd.notes')}</span><textarea class="hud-input resize-none" rows="2" bind:value={edit.notes}></textarea></label>
           </div>
-          <div class="flex items-center gap-2 mt-3"><button class="hud-btn hud-btn-primary" on:click={saveEdit}>save vm</button><button class="hud-btn" on:click={archiveVm}>archive</button><button class="hud-btn !text-neon-red border-neon-red/40" on:click={deleteVm}>delete</button>{#if editMsg}<span class="text-xs font-mono text-neon-red">{editMsg}</span>{/if}</div>
+          <div class="flex items-center gap-2 mt-3"><button class="hud-btn hud-btn-primary" on:click={saveEdit}>{$t('vd.saveVm')}</button><button class="hud-btn" on:click={archiveVm}>{$t('vd.archive')}</button><button class="hud-btn !text-neon-red border-neon-red/40" on:click={deleteVm}>{$t('g.delete')}</button>{#if editMsg}<span class="text-xs font-mono text-neon-red">{editMsg}</span>{/if}</div>
           <label class="flex items-center gap-2 mt-3 cursor-pointer select-none">
             <input type="checkbox" class="accent-neon-cyan" checked={vm.ai_enabled} on:change={toggleAIAccess} />
-            <span class="hud-label">ai access {vm.ai_enabled ? '(granted)' : '(off)'}</span>
-            <span class="text-[11px] text-hud-dim">// grant the assistant read access to this VM</span>
+            <span class="hud-label">{$t('vd.aiAccess', { state: vm.ai_enabled ? $t('vd.aiGranted') : $t('vd.aiOffState') })}</span>
+            <span class="text-[11px] text-hud-dim">{$t('vd.aiAccessHint')}</span>
           </label>
         </div>
         <div class="border-t border-hud-line pt-3">
-          <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">ssh credentials</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">set</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">none</span>{/if}</div>
+          <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">{$t('vd.sshCreds')}</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">{$t('vd.credsSet')}</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">{$t('vd.credsNone')}</span>{/if}</div>
           <div class="grid grid-cols-3 gap-2">
-            <input class="hud-input" placeholder="ssh user" bind:value={cred.ssh_user} />
+            <input class="hud-input" placeholder={$t('vd.sshUserPh')} bind:value={cred.ssh_user} />
             <select class="hud-input" bind:value={cred.auth_type}><option value="password">password</option><option value="key">key</option><option value="agent">agent</option></select>
             {#if cred.auth_type === 'key'}
               <textarea class="hud-input font-mono resize-none" rows="2" placeholder={credPH} bind:value={cred.secret}></textarea>
@@ -542,12 +575,14 @@
             {/if}
           </div>
           {#if cred.auth_type === 'key'}
-            <input class="hud-input mt-2" type="password" placeholder="key passphrase (leave empty if none)" bind:value={cred.key_passphrase} />
+            <input class="hud-input mt-2" type="password" placeholder={$t('vd.keyPassph')} bind:value={cred.key_passphrase} />
           {/if}
-          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy}>{cred.busy ? 'saving…' : 'save & probe'}</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>clear</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-amber'}">{cred.msg}</span>{/if}</div>
+          <input class="hud-input mt-2" type="password" placeholder={$t('vd.sudoPw')} bind:value={cred.sudo_password} />
+          {#if cred.has_sudo && !cred.sudo_password}<span class="hud-label text-neon-green mt-1 inline-block">{$t('vd.sudoSet')}</span>{/if}
+          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy}>{cred.busy ? $t('g.saving') : $t('vd.saveProbe')}</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>{$t('vd.clear')}</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-amber'}">{cred.msg}</span>{/if}</div>
           {#if validate.kind}
             <div class="text-xs font-mono text-neon-red mt-2">
-              connection check: <span class="uppercase">{validate.kind}</span> {#if validate.kind === 'no_credentials'}— enter a secret above{:else if validate.kind === 'auth_failed'}— wrong user/password/key{:else if validate.kind === 'host_key_changed'}— <button class="hud-btn !px-2 !py-0.5" on:click={resetHostKey}>reset host key</button>{/if}
+              {$t('vd.connCheck')} <span class="uppercase">{validate.kind}</span> {#if validate.kind === 'no_credentials'}{$t('vd.errSecret')}{:else if validate.kind === 'auth_failed'}{$t('vd.errAuth')}{:else if validate.kind === 'host_key_changed'}— <button class="hud-btn !px-2 !py-0.5" on:click={resetHostKey}>{$t('vd.resetHostKey')}</button>{/if}
               {#if validate.detail}<div class="text-hud-dim mt-1 break-all">{validate.detail}</div>{/if}
             </div>
           {/if}
@@ -559,14 +594,14 @@
     <div class="grid grid-cols-2 gap-3">
       <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
-          <span class="hud-label text-neon-cyan">status&nbsp;//&nbsp;battery</span>
+          <span class="hud-label text-neon-cyan">{$t('vd.statusBattery')}</span>
           {#if !battery.busy && battery.probes.length}
-            <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? 'up' : 'down'} · <span class="normal-case">{livenessEvidence}</span></span>
+            <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? $t('vd.up') : $t('vd.down')} · <span class="normal-case">{livenessEvidence}</span></span>
           {/if}
           <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
         </div>
         {#if battery.busy}
-          <div class="hud-label text-hud-dim animate-pulse">probing ping · ssh · dns · web · tls…</div>
+          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.probingBattery')}</div>
         {:else if battery.err}
           <div class="text-xs font-mono text-neon-red">{battery.err}</div>
         {:else}
@@ -579,19 +614,19 @@
               </div>
             {/each}
           </div>
-          <div class="text-[11px] text-hud-dim">// ping=ICMP echo · ssh=:22 reachable (set the real port in ⚙ edit if non-standard) · web=:80 · tls=:443 · dns=name→ip</div>
-          {#if !battery.probes.length}<div class="hud-label text-hud-dim">no probes</div>{/if}
+          <div class="text-[11px] text-hud-dim">{$t('vd.batteryHint')}</div>
+          {#if !battery.probes.length}<div class="hud-label text-hud-dim">{$t('vd.noProbes')}</div>{/if}
         {/if}
       </section>
 
       <section class="hud-panel p-3 space-y-2">
-        <div class="hud-label text-neon-cyan">tools&nbsp;//&nbsp;probe</div>
+        <div class="hud-label text-neon-cyan">{$t('vd.toolsProbe')}</div>
         <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
           <select class="hud-input" bind:value={diag.check_type}>
-            {#each DIAG_TYPES as t}<option value={t}>{t}</option>{/each}
+            {#each DIAG_TYPES as dt}<option value={dt}>{dt}</option>{/each}
           </select>
           <input class="hud-input" placeholder={needsParam ? (diag.check_type === 'http' ? 'http://host/path' : 'port') : '—'} bind:value={diag.param} disabled={!needsParam} />
-          <button class="hud-btn hud-btn-primary" on:click={runDiag} disabled={diag.busy}>{diag.busy ? '…' : 'run'}</button>
+          <button class="hud-btn hud-btn-primary" on:click={runDiag} disabled={diag.busy}>{diag.busy ? '…' : $t('g.run')}</button>
         </div>
         {#if diag.msg}<div class="text-xs font-mono text-neon-red">{diag.msg}</div>{/if}
         {#if diag.res}
@@ -608,19 +643,19 @@
     {#if vm.ip}
       <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
-          <span class="hud-label text-neon-cyan">ip&nbsp;//&nbsp;info</span>
+          <span class="hud-label text-neon-cyan">{$t('vd.ipInfo')}</span>
           <span class="text-xs text-hud-dim font-mono truncate ml-1">{vm.ip}</span>
           <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadIPInfo(vmId)} disabled={ipinfo.busy}>{ipinfo.busy ? '…' : '↻'}</button>
         </div>
         {#if ipinfo.busy}
-          <div class="hud-label text-hud-dim animate-pulse">resolving geo · asn · ptr…</div>
+          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.resolvingGeo')}</div>
         {:else if ipinfo.err}
           <div class="text-xs font-mono text-neon-red">{ipinfo.err}</div>
         {:else if ipinfo.data}
           <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
-            <div class="truncate"><span class="hud-label text-hud-dim">location</span> {ipinfo.data.country || '—'}{ipinfo.data.city ? ' · ' + ipinfo.data.city : ''}{ipinfo.data.country_code ? ' (' + ipinfo.data.country_code + ')' : ''}</div>
+            <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.location')}</span> {ipinfo.data.country || '—'}{ipinfo.data.city ? ' · ' + ipinfo.data.city : ''}{ipinfo.data.country_code ? ' (' + ipinfo.data.country_code + ')' : ''}</div>
             <div class="truncate"><span class="hud-label text-hud-dim">asn</span> {ipinfo.data.asn || '—'}</div>
-            <div class="truncate"><span class="hud-label text-hud-dim">isp</span> {ipinfo.data.isp || ipinfo.data.org || '—'}</div>
+            <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.isp')}</span> {ipinfo.data.isp || ipinfo.data.org || '—'}</div>
             <div class="truncate"><span class="hud-label text-hud-dim">tz</span> {ipinfo.data.timezone || '—'}</div>
             <div class="col-span-2 md:col-span-4 truncate"><span class="hud-label text-hud-dim">ptr</span> {ipinfo.data.ptr || '—'}</div>
           </div>
@@ -632,66 +667,114 @@
     <!-- Ports // exposed (external scan, Plane A, no creds) -->
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
-        <span class="hud-label text-neon-cyan">ports&nbsp;//&nbsp;exposed</span>
-        <span class="text-xs text-hud-dim font-mono ml-1">{portscan.ports.filter((p) => p.open).length} open / {portscan.ports.length} scanned</span>
-        <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadPortScan(vmId)} disabled={portscan.busy}>{portscan.busy ? '…' : '↻'}</button>
-      </div>
-      {#if portscan.busy}
-        <div class="hud-label text-hud-dim animate-pulse">scanning common ports…</div>
-      {:else if portscan.err}
-        <div class="text-xs font-mono text-neon-red">{portscan.err}</div>
-      {:else}
-        <div class="flex flex-wrap gap-1.5">
-          {#each portscan.ports as p}
-            <div class="flex items-center gap-1 border rounded px-1.5 py-0.5 text-xs font-mono {p.open ? 'border-neon-green/40 bg-neon-green/5' : 'border-hud-line opacity-50'}" title={p.open ? 'open — ' + p.service : 'closed/filtered'}>
-              <span class="{p.open ? 'text-neon-green' : 'text-hud-dim'}">{p.open ? '●' : '○'}</span>
-              <span class={p.open ? 'text-emerald-100' : 'text-hud-dim'}>{p.port}</span>
-              <span class="text-hud-dim">{p.service}</span>
-            </div>
-          {/each}
+          <span class="hud-label text-neon-cyan">{$t('vd.portsExposed')}</span>
+          <span class="text-xs text-hud-dim font-mono ml-1">{$t('vd.portsCount', { open: portscan.ports.filter((p) => p.open).length, scanned: portscan.ports.length })}</span>
+          <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadPortScan(vmId)} disabled={portscan.busy}>{portscan.busy ? '…' : '↻'}</button>
         </div>
-        <div class="text-[11px] text-hud-dim">// scanned from the VM Pulse host (external view). ● = port answers, ○ = closed/filtered.</div>
-      {/if}
+        {#if portscan.busy}
+          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.scanningPorts')}</div>
+        {:else if portscan.err}
+          <div class="text-xs font-mono text-neon-red">{portscan.err}</div>
+        {:else}
+          <div class="flex flex-wrap gap-1.5">
+            {#each portscan.ports as p}
+              <div class="flex items-center gap-1 border rounded px-1.5 py-0.5 text-xs font-mono {p.open ? 'border-neon-green/40 bg-neon-green/5' : 'border-hud-line opacity-50'}" title={p.open ? $t('vd.openSvc', { service: p.service }) : $t('vd.closed')}>
+                <span class="{p.open ? 'text-neon-green' : 'text-hud-dim'}">{p.open ? '●' : '○'}</span>
+                <span class={p.open ? 'text-emerald-100' : 'text-hud-dim'}>{p.port}</span>
+                <span class="text-hud-dim">{p.service}</span>
+              </div>
+            {/each}
+          </div>
+          <div class="text-[11px] text-hud-dim">{$t('vd.portsHint')}</div>
+        {/if}
     </section>
+
+    <!-- Security // exposures (curated exposure scan, Plane A, no creds) -->
+    {#if vm.ip}
+      <section class="hud-panel p-3 space-y-2">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="hud-label text-neon-cyan">{$t('vd.exposures')}</span>
+          {#if !exposures.busy && exposures.findings.length}
+            <span class="hud-label text-hud-dim font-mono ml-1">{exposures.findings.filter(f => f.severity === 'critical').length} critical · {exposures.findings.length} total</span>
+          {/if}
+          <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={() => loadExposures(vmId)} disabled={exposures.busy}>{exposures.busy ? '…' : $t('g.scan')}</button>
+        </div>
+        {#if exposures.busy}
+          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.exposuresScanning')}</div>
+        {:else if exposures.err}
+          <div class="text-xs font-mono text-neon-red">{exposures.err}</div>
+        {:else if exposures.findings.length}
+          <div class="text-[11px] text-hud-dim">{$t('vd.exposuresHint')}</div>
+          <div class="space-y-1.5">
+            {#each exposures.findings as f (f.id)}
+              <div class="border-l-2 pl-2 py-1 {f.severity === 'critical' ? 'border-neon-red bg-neon-red/5' : f.severity === 'high' ? 'border-neon-amber bg-neon-amber/5' : 'border-hud-line'}">
+                <div class="flex items-center gap-2">
+                  <span class="hud-label uppercase {f.severity === 'critical' ? 'text-neon-red' : f.severity === 'high' ? 'text-neon-amber' : 'text-hud-dim'}">{f.severity}</span>
+                  <span class="text-xs font-mono text-emerald-100">{f.title}</span>
+                </div>
+                <div class="text-[11px] text-hud-dim mt-0.5">{f.detail}</div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="hud-label text-neon-green">{$t('vd.exposuresNone')}</div>
+        {/if}
+      </section>
+    {/if}
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
       <section class="hud-panel p-3 space-y-2">
         <div class="flex items-center gap-2">
-          <div class="hud-label text-neon-cyan">system&nbsp;//&nbsp;profile</div>
-          <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : '↻ refresh'}</button>
+          <div class="hud-label text-neon-cyan">{$t('vd.systemProfile')}</div>
+          <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : $t('g.refresh')}</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
-          <div class="truncate"><span class="hud-label text-hud-dim">os</span> {system.os || '—'}</div>
-          <div class="truncate"><span class="hud-label text-hud-dim">kernel</span> {system.kernel || '—'} {system.arch}</div>
-          <div class="truncate col-span-2"><span class="hud-label text-hud-dim">cpu</span> {system.cpu_model || '—'}</div>
-          <div><span class="hud-label text-hud-dim">ram</span> {system.mem_total_mb} MB</div>
-          <div><span class="hud-label text-hud-dim">swap</span> {system.swap_total_mb} MB</div>
-          <div><span class="hud-label text-hud-dim">packages</span> {system.packages || '—'}</div>
-          <div><span class="hud-label text-hud-dim">services</span> {system.services || '—'}</div>
-          <div class="col-span-2"><span class="hud-label text-hud-dim">up</span> {system.uptime || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.os')}</span> {system.os || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.kernel')}</span> {system.kernel || '—'} {system.arch}</div>
+          <div class="truncate col-span-2"><span class="hud-label text-hud-dim">{$t('vd.cpu')}</span> {system.cpu_model || '—'}</div>
+          <div><span class="hud-label text-hud-dim">{$t('vd.ram')}</span> {system.mem_total_mb} MB</div>
+          <div><span class="hud-label text-hud-dim">{$t('vd.swap')}</span> {system.swap_total_mb} MB</div>
+          <div><span class="hud-label text-hud-dim">{$t('vd.packages')}</span> {system.packages || '—'}</div>
+          <div><span class="hud-label text-hud-dim">{$t('vd.services')}</span> {system.services || '—'}</div>
+          <div class="col-span-2"><span class="hud-label text-hud-dim">{$t('vd.uptime')}</span> {system.uptime || '—'}</div>
         </div>
         {#if system.ports?.length}
-          <div class="text-xs font-mono"><span class="hud-label text-hud-dim">listening ports:</span> <span class="text-emerald-200">{system.ports.join(', ')}</span></div>
+          <div class="text-xs font-mono"><span class="hud-label text-hud-dim">{$t('vd.listeningPorts')}</span> <span class="text-emerald-200">{system.ports.join(', ')}</span></div>
         {/if}
         {#if system.docker?.length}
-          <div class="text-xs font-mono space-y-0.5"><span class="hud-label text-hud-dim">docker:</span>{#each system.docker as d}<div class="text-emerald-200/80 pl-2 truncate">▸ {d.replace(/\|/g, ' · ')}</div>{/each}</div>
+          <details class="text-xs font-mono" open>
+            <summary class="hud-label text-hud-dim cursor-pointer">{$t('vd.dockerContainers', { up: system.docker.filter((c) => c.up).length, n: system.docker.length })}</summary>
+            <div class="space-y-1.5 mt-1.5">
+              {#each system.docker as c}
+                <div class="pl-1">
+                  <div class="flex items-center gap-2">
+                    <span class={c.up ? 'text-neon-green' : 'text-neon-red'} title={c.status}>{c.up ? '●' : '○'}</span>
+                    <span class="text-emerald-200/90 truncate">{c.name || '—'}</span>
+                    {#if c.image}<span class="text-hud-dim truncate">// {c.image}</span>{/if}
+                    <span class="text-hud-dim ml-auto whitespace-nowrap text-[10px]">{c.status}</span>
+                  </div>
+                  {#if c.ports}<div class="text-hud-dim/70 pl-5 text-[10px] truncate">{c.ports}</div>{/if}
+                </div>
+              {/each}
+            </div>
+          </details>
         {/if}
         {#if system.services_list?.length}
           <details class="text-xs font-mono">
-            <summary class="hud-label text-hud-dim cursor-pointer">running services ({system.services_list.length})</summary>
+            <summary class="hud-label text-hud-dim cursor-pointer">{$t('vd.runningServices', { n: system.services_list.length })}</summary>
             <div class="flex flex-wrap gap-1 mt-1">{#each system.services_list as svc}<span class="text-emerald-200/70 border border-hud-line rounded px-1">{svc}</span>{/each}</div>
           </details>
         {/if}
         {#if system.packages != null}
           <details class="text-xs font-mono" on:open={loadPackages}>
-            <summary class="hud-label text-hud-dim cursor-pointer">packages ({system.packages})</summary>
+            <summary class="hud-label text-hud-dim cursor-pointer">{$t('vd.packagesN', { n: system.packages })}</summary>
             {#if packagesList === null}
-              <div class="hud-label text-hud-dim mt-1 animate-pulse">loading…</div>
+              <div class="hud-label text-hud-dim mt-1 animate-pulse">{$t('g.loading')}</div>
             {:else if packagesList.length}
               <div class="flex flex-wrap gap-1 mt-1 max-h-32 overflow-auto">{#each packagesList as p}<span class="text-emerald-200/60 border border-hud-line rounded px-1">{p}</span>{/each}</div>
             {:else}
-              <div class="hud-label text-hud-dim mt-1">no package list</div>
+              <div class="hud-label text-hud-dim mt-1">{$t('vd.noPackageList')}</div>
             {/if}
           </details>
         {/if}
@@ -701,16 +784,16 @@
     <!-- Logs // errors (journalctl priority=err, Plane B over SSH) -->
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="hud-label text-neon-cyan">logs&nbsp;//&nbsp;errors</span>
+        <span class="hud-label text-neon-cyan">{$t('vd.logsErrors')}</span>
         {#each ['1h', '24h', '7d'] as r}
           <button class="hud-btn !py-0.5 {errors.range === r ? 'hud-btn-primary' : ''}" on:click={() => { errors.range = r }}>{r}</button>
         {/each}
-        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadErrors} disabled={errors.busy}>{errors.busy ? '…' : '▶ scan'}</button>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadErrors} disabled={errors.busy}>{errors.busy ? '…' : $t('g.scan')}</button>
       </div>
       {#if errors.err}
-        <div class="text-xs font-mono text-neon-red">{errors.err}{#if errors.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{:else if errors.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}</div>
+        <div class="text-xs font-mono text-neon-red">{errors.err}{#if errors.kind === 'no_credentials'}<span class="text-hud-dim"> {$t('vd.setCredsHint')}</span>{:else if errors.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>{$t('vd.resetHostKey')}</button>{/if}</div>
       {:else if errors.data}
-        <div class="text-xs font-mono text-hud-dim">{errors.data.count} error(s) in last {errors.data.window}</div>
+        <div class="text-xs font-mono text-hud-dim">{$t('vd.errorsCount', { n: errors.data.count, window: errors.data.window })}</div>
         {#if errors.data.entries?.length}
           <div class="space-y-1 max-h-56 overflow-auto">
             {#each errors.data.entries as e}
@@ -720,7 +803,7 @@
             {/each}
           </div>
         {:else}
-          <div class="hud-label text-neon-green">no errors ✓</div>
+          <div class="hud-label text-neon-green">{$t('vd.noErrors')}</div>
         {/if}
       {/if}
     </section>
@@ -729,26 +812,26 @@
     {#if cred.has_secret}
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
-        <span class="hud-label text-neon-cyan">updates&nbsp;//&nbsp;available</span>
-        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadUpdates} disabled={updates.busy}>{updates.busy ? '…' : '▶ check'}</button>
+        <span class="hud-label text-neon-cyan">{$t('vd.updatesAvail')}</span>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadUpdates} disabled={updates.busy}>{updates.busy ? '…' : $t('g.check')}</button>
       </div>
       {#if updates.err}
-        <div class="text-xs font-mono text-neon-red">{updates.err}{#if updates.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+        <div class="text-xs font-mono text-neon-red">{updates.err}{#if updates.kind === 'no_credentials'}<span class="text-hud-dim"> {$t('vd.setCredsHint')}</span>{/if}</div>
       {:else if updates.data}
         <div class="flex items-center gap-3 flex-wrap">
           {#if updates.data.count === 0}
-            <span class="hud-label text-neon-green">system up to date ✓</span>
+            <span class="hud-label text-neon-green">{$t('vd.upToDate')}</span>
           {:else}
-            <span class="text-xs font-mono {updates.data.security_count > 0 ? 'text-neon-red' : 'text-neon-amber'}">{updates.data.count} upgradable{#if updates.data.security_count > 0} · {updates.data.security_count} security{/if}</span>
+            <span class="text-xs font-mono {updates.data.security_count > 0 ? 'text-neon-red' : 'text-neon-amber'}">{$t('vd.upgradable', { n: updates.data.count })}{#if updates.data.security_count > 0} · {$t('vd.security', { n: updates.data.security_count })}{/if}</span>
           {/if}
           {#if updates.data.reboot_required}
-            <span class="hud-label text-neon-red border border-neon-red/40 rounded px-1.5">⚠ reboot required</span>
+            <span class="hud-label text-neon-red border border-neon-red/40 rounded px-1.5">{$t('vd.rebootRequired')}</span>
           {/if}
-          <span class="hud-label text-hud-dim">mgr: {updates.data.manager}</span>
+          <span class="hud-label text-hud-dim">{$t('vd.mgr', { name: updates.data.manager })}</span>
         </div>
         {#if updates.data.packages?.length}
           <details class="text-xs font-mono">
-            <summary class="hud-label text-hud-dim cursor-pointer">packages ({updates.data.packages.length})</summary>
+            <summary class="hud-label text-hud-dim cursor-pointer">{$t('vd.packagesN', { n: updates.data.packages.length })}</summary>
             <div class="flex flex-wrap gap-1 mt-1 max-h-40 overflow-auto">{#each updates.data.packages as p}<span class="border rounded px-1 {p.security ? 'text-neon-red border-neon-red/40' : 'text-emerald-200/70 border-hud-line'}" title={p.version + ' · ' + p.suite}>{p.name}{#if p.security} ⚡{/if}</span>{/each}</div>
           </details>
         {/if}
@@ -760,21 +843,21 @@
     {#if cred.has_secret}
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
-        <span class="hud-label text-neon-cyan">sites&nbsp;//&nbsp;vhosts</span>
-        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadVHosts} disabled={vhosts.busy}>{vhosts.busy ? '…' : '▶ scan'}</button>
+        <span class="hud-label text-neon-cyan">{$t('vd.sitesVhosts')}</span>
+        <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadVHosts} disabled={vhosts.busy}>{vhosts.busy ? '…' : $t('g.scan')}</button>
       </div>
       {#if vhosts.err}
-        <div class="text-xs font-mono text-neon-red">{vhosts.err}{#if vhosts.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}</div>
+        <div class="text-xs font-mono text-neon-red">{vhosts.err}{#if vhosts.kind === 'no_credentials'}<span class="text-hud-dim"> {$t('vd.setCredsHint')}</span>{/if}</div>
       {:else if vhosts.data}
-        <div class="text-xs font-mono text-hud-dim">server: {vhosts.data.server}{#if vhosts.data.listening?.length}<span class="ml-2">listening: {vhosts.data.listening.join(', ')}</span>{/if}{#if !vhosts.data.root}<span class="ml-2 text-neon-amber">(non-root)</span>{/if}</div>
+        <div class="text-xs font-mono text-hud-dim">{$t('vd.server', { name: vhosts.data.server })}{#if vhosts.data.listening?.length}<span class="ml-2">{$t('vd.listening')} {vhosts.data.listening.join(', ')}</span>{/if}{#if !vhosts.data.root}<span class="ml-2 text-neon-amber">{$t('vd.nonRoot')}</span>{/if}</div>
         {#if vhosts.data.sites?.length}
           <div class="flex flex-wrap gap-1">{#each vhosts.data.sites as s}<span class="text-emerald-200/80 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono">{s.name}{#if s.port}<span class="text-hud-dim">:{s.port}</span>{/if}</span>{/each}</div>
         {:else if vhosts.data.server === 'unknown'}
-          <div class="hud-label text-neon-amber">web ports open (:80/:443) but SSH user is non-root — can't read the server config. Use a root/sudo login to inspect vhosts.</div>
+          <div class="hud-label text-neon-amber">{$t('vd.vhostsNonRoot')}</div>
         {:else if vhosts.data.server !== 'none'}
-          <div class="hud-label text-neon-amber">{vhosts.data.server} serves :80/:443 but no readable vhost config (container / non-standard path)</div>
+          <div class="hud-label text-neon-amber">{$t('vd.vhostsNoConfig', { server: vhosts.data.server })}</div>
         {:else}
-          <div class="hud-label text-hud-dim">no web server on :80/:443</div>
+          <div class="hud-label text-hud-dim">{$t('vd.noWebServer')}</div>
         {/if}
       {/if}
     </section>
@@ -784,21 +867,21 @@
     {#if vm.ip && (battery.busy || batteryWebOk)}
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
-        <span class="hud-label text-neon-cyan">site&nbsp;//&nbsp;info</span>
+        <span class="hud-label text-neon-cyan">{$t('vd.siteInfo')}</span>
         <input class="hud-input text-xs flex-1 min-w-0" bind:value={siteinfo.url} placeholder="http://host/" />
-        <button class="hud-btn hud-btn-primary !py-0.5" on:click={loadSiteInfo} disabled={siteinfo.busy}>{siteinfo.busy ? '…' : '▶ scan'}</button>
+        <button class="hud-btn hud-btn-primary !py-0.5" on:click={loadSiteInfo} disabled={siteinfo.busy}>{siteinfo.busy ? '…' : $t('g.scan')}</button>
       </div>
       {#if siteinfo.err}
         <div class="text-xs font-mono text-neon-red">{siteinfo.err}</div>
       {:else if siteinfo.data}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
-          <div class="truncate"><span class="hud-label text-hud-dim">status</span> {siteinfo.data.status || '—'}</div>
-          <div class="truncate"><span class="hud-label text-hud-dim">server</span> {siteinfo.data.server || '—'}</div>
-          <div class="truncate"><span class="hud-label text-hud-dim">powered</span> {siteinfo.data.powered_by || '—'}</div>
-          <div class="truncate"><span class="hud-label text-hud-dim">cms</span> <span class="text-neon-cyan">{siteinfo.data.cms || '—'}{#if siteinfo.data.cms_version}<span class="text-hud-dim"> {siteinfo.data.cms_version}</span>{/if}</span></div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.status')}</span> {siteinfo.data.status || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.serverLbl')}</span> {siteinfo.data.server || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.powered')}</span> {siteinfo.data.powered_by || '—'}</div>
+          <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.cms')}</span> <span class="text-neon-cyan">{siteinfo.data.cms || '—'}{#if siteinfo.data.cms_version}<span class="text-hud-dim"> {siteinfo.data.cms_version}</span>{/if}</span></div>
         </div>
         <div class="text-xs font-mono">
-          <span class="hud-label text-hud-dim">security:</span>
+          <span class="hud-label text-hud-dim">{$t('vd.securityLbl')}</span>
           {#each Object.entries(siteinfo.data.security_headers || {}) as [k, v]}
             <span class="ml-1 {v ? 'text-neon-green' : 'text-neon-red'}">{v ? '✓' : '✗'}{k.replace('X-Frame-Options','XFO').replace('Strict-Transport-Security','HSTS').replace('Content-Security-Policy','CSP').replace('X-Content-Type-Options','XCTO').replace('Referrer-Policy','RP')}</span>
           {/each}
@@ -812,9 +895,9 @@
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="hud-label text-neon-cyan">metrics&nbsp;//&nbsp;history</span>
-        <span class="hud-label text-hud-dim ml-auto">ssh pull · ~15min</span>
-        <button class="hud-btn !py-0.5" on:click={toggleMetrics}>{vm.metrics_enabled ? '● on' : '○ off'}</button>
+        <span class="hud-label text-neon-cyan">{$t('vd.metricsHistory')}</span>
+        <span class="hud-label text-hud-dim ml-auto">{$t('vd.sshPull')}</span>
+        <button class="hud-btn !py-0.5" on:click={toggleMetrics}>{vm.metrics_enabled ? $t('vd.metricsOn') : $t('vd.metricsOff')}</button>
       </div>
       {#if vm.metrics_enabled}
         <div class="flex items-center gap-2 flex-wrap">
@@ -822,63 +905,63 @@
             <button class="hud-btn !py-0.5 {metricsRange === r ? 'hud-btn-primary' : ''}" on:click={() => { metricsRange = r; loadMetrics() }}>{r}</button>
           {/each}
           <button class="hud-btn !py-0.5" on:click={loadMetrics} disabled={metricsBusy}>{metricsBusy ? '…' : '↻'}</button>
-          {#if metricsTs}<span class="text-[10px] font-mono text-hud-dim ml-auto">last: {metricsTs.slice(11, 19)}</span>{/if}
+          {#if metricsTs}<span class="text-[10px] font-mono text-hud-dim ml-auto">{$t('vd.last')} {metricsTs.slice(11, 19)}</span>{/if}
         </div>
         {#if metricsErr}<div class="text-xs font-mono text-neon-red">{metricsErr}</div>{/if}
         <div class="grid grid-cols-2 gap-2">
-          <MetricsChart label="cpu" unit="%" data={series.cpu_pct} decimals={0} color="#f97316" />
-          <MetricsChart label="mem used" unit="MB" data={series.mem_used_mb} color="#22d3ee" />
-          <MetricsChart label="swap used" unit="MB" data={series.swap_used_mb} color="#a78bfa" />
-          <MetricsChart label="disk used" unit="GB" data={series.disk_used_gb} decimals={1} color="#22c55e" />
-          <MetricsChart label="load 1m" data={series.load1} decimals={2} color="#eab308" />
+          <MetricsChart label={$t('vd.cpu')} unit="%" data={series.cpu_pct} decimals={0} color="#f97316" />
+          <MetricsChart label={$t('vd.memory')} unit="MB" data={series.mem_used_mb} color="#22d3ee" />
+          <MetricsChart label={$t('vd.swap')} unit="MB" data={series.swap_used_mb} color="#a78bfa" />
+          <MetricsChart label={$t('vd.disk')} unit="GB" data={series.disk_used_gb} decimals={1} color="#22c55e" />
+          <MetricsChart label={$t('vd.load') + ' 1m'} data={series.load1} decimals={2} color="#eab308" />
           <MetricsChart label="tcp conns" data={series.tcp_conns} color="#38bdf8" />
           <MetricsChart label="net rx" unit="KB/s" data={series.net_rx_kbps} decimals={1} color="#34d399" />
           <MetricsChart label="net tx" unit="KB/s" data={series.net_tx_kbps} decimals={1} color="#f472b6" />
         </div>
       {:else}
-        <p class="text-xs text-hud-dim">// enable to collect CPU/RAM/disk/load history over SSH (no agent install). Needs SSH creds. Tip: use a restricted monitoring user (sudo allowlist) instead of root — same metrics, smaller blast radius. On-demand snapshot below works without enabling this.</p>
+        <p class="text-xs text-hud-dim">{$t('vd.metricsHint')}</p>
       {/if}
     </section>
 
     <!-- Live (interactive terminal) + one-shot snapshot (only when metrics history is off) -->
     <section class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="hud-label text-neon-cyan">live&nbsp;//&nbsp;terminal</span>
+        <span class="hud-label text-neon-cyan">{$t('vd.liveTerminal')}</span>
         {#if !vm.metrics_enabled}
-          <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : '▶ snapshot'}</button>
+          <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={runSnapshot} disabled={snap.busy}>{snap.busy ? '…' : $t('vd.snapshot')}</button>
         {/if}
-        <button class="hud-btn !py-0.5 {!vm.metrics_enabled ? '' : 'ml-auto'}" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? '✕ close' : '> terminal'}</button>
+        <button class="hud-btn !py-0.5 {!vm.metrics_enabled ? '' : 'ml-auto'}" on:click={() => { showTerm = !showTerm; termNote = { msg: '', kind: '' } }}>{showTerm ? $t('g.close') : $t('vd.terminal')}</button>
       </div>
 
       {#if !vm.metrics_enabled}
         {#if snap.err}
           <div class="text-xs font-mono text-neon-red">
             {snap.err}
-            {#if snap.kind === 'no_credentials'}<span class="text-hud-dim"> — set SSH creds in ⚙ edit</span>{/if}
-            {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
+            {#if snap.kind === 'no_credentials'}<span class="text-hud-dim"> {$t('vd.setCredsHint')}</span>{/if}
+            {#if snap.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>{$t('vd.resetHostKey')}</button>{/if}
           </div>
         {/if}
         {#if snap.data}
           <div class="space-y-1.5">
             <div>
-              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>memory</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
+              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>{$t('vd.memory')}</span><span>{snap.data.mem_used_mb}/{snap.data.mem_total_mb} MB</span></div>
               <div class="h-1.5 bg-hud-line rounded"><div class="h-full bg-neon-cyan rounded" style="width:{memPct}%"></div></div>
             </div>
             <div>
-              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>disk /</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
+              <div class="flex justify-between text-[11px] font-mono text-hud-dim"><span>{$t('vd.disk')}</span><span>{Number(snap.data.disk_used_gb).toFixed(1)}/{Number(snap.data.disk_total_gb).toFixed(1)} GB</span></div>
               <div class="h-1.5 bg-hud-line rounded"><div class="h-full {diskPct > 85 ? 'bg-neon-red' : 'bg-neon-green'} rounded" style="width:{diskPct}%"></div></div>
             </div>
             <div class="grid grid-cols-3 gap-2 text-xs font-mono">
-              <div><span class="hud-label text-hud-dim">load</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
-              <div><span class="hud-label text-hud-dim">cpus</span> <span>{snap.data.cpu_count}</span></div>
-              <div class="truncate"><span class="hud-label text-hud-dim">up</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
+              <div><span class="hud-label text-hud-dim">{$t('vd.load')}</span> <span class="text-neon-green">{snap.data.load1?.toFixed(2)}</span> <span class="text-hud-dim">{snap.data.load5?.toFixed(2)}/{snap.data.load15?.toFixed(2)}</span></div>
+              <div><span class="hud-label text-hud-dim">{$t('vd.cpus')}</span> <span>{snap.data.cpu_count}</span></div>
+              <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.uptime')}</span> <span class="text-hud-dim">{snap.data.uptime}</span></div>
             </div>
           </div>
         {:else if !snap.err}
-          <p class="text-xs text-hud-dim">// run a snapshot to fetch CPU / RAM / disk / load over SSH now.</p>
+          <p class="text-xs text-hud-dim">{$t('vd.snapshotHint')}</p>
         {/if}
       {:else}
-        <p class="text-xs text-hud-dim">// live CPU/RAM/disk/load values are in the metrics history above; enable a terminal session here.</p>
+        <p class="text-xs text-hud-dim">{$t('vd.liveMetricsHint')}</p>
       {/if}
 
       {#if showTerm}
@@ -889,7 +972,7 @@
           {#if termNote.msg}
             <div class="text-xs font-mono text-neon-red">
               {termNote.msg}
-              {#if termNote.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>reset host key</button>{/if}
+              {#if termNote.kind === 'host_key_changed'}<button class="hud-btn !px-2 !py-0.5 ml-2" on:click={resetHostKey}>{$t('vd.resetHostKey')}</button>{/if}
             </div>
           {/if}
         </div>
@@ -898,7 +981,7 @@
 
     <!-- Alert checks (user-configured; system liveness is auto-managed and hidden) -->
     <details class="hud-panel p-3">
-      <summary class="hud-label text-neon-cyan cursor-pointer">alert checks&nbsp;//&nbsp;{userChecks.length}</summary>
+      <summary class="hud-label text-neon-cyan cursor-pointer">{$t('vd.alertChecks', { n: userChecks.length })}</summary>
       <div class="text-[11px] text-hud-dim mt-1">// extra checks for alerting on specific services. Liveness (the status dot) is always-on automatically — you don't configure it here.</div>
       <div class="space-y-2 mt-2">
         {#if !userChecks.length}<div class="hud-label text-hud-dim">// none — liveness is tracked automatically. Add a check (e.g. tcp:443) to alert on a specific service.</div>{:else}
@@ -907,7 +990,7 @@
               {@const r = results.find((x) => x.check_id === c.id)}
               <div class="flex items-center gap-2 text-xs font-mono border border-hud-line rounded px-2 py-1">
                 <span class="text-emerald-200 w-14">{c.check_type}</span>
-                {#if r}<span class="hud-label {r.latest_status === 'ok' ? 'text-neon-green' : r.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{r.latest_status}</span><span class="text-hud-dim">{Number(r.latest_latency_ms).toFixed(1)}ms</span>{:else}<span class="hud-label text-hud-dim">pending</span>{/if}
+                {#if r}<span class="hud-label {r.latest_status === 'ok' ? 'text-neon-green' : r.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{r.latest_status}</span><span class="text-hud-dim">{Number(r.latest_latency_ms).toFixed(1)}ms</span>{#if r.latest_message && r.latest_status !== 'ok'}<span class="text-neon-amber/80 truncate">{r.latest_message}</span>{/if}{:else}<span class="hud-label text-hud-dim">pending</span>{/if}
                 <span class="ml-auto text-hud-dim">/{c.interval_sec}s</span>
                 <button class="hud-btn !px-2 !py-0.5" on:click={() => runNow(c)} title="run now">▶</button>
                 <button class="hud-btn !px-2 !py-0.5 !text-neon-red border-neon-red/40" on:click={() => removeCheck(c)} title="delete">✕</button>
@@ -916,10 +999,10 @@
           </div>
         {/if}
         <div class="grid grid-cols-[auto_1fr_auto_auto] gap-2 pt-1 items-center">
-          <select class="hud-input" bind:value={nc.check_type}>{#each MON_TYPES as t}<option value={t}>{t}</option>{/each}</select>
+          <select class="hud-input" bind:value={nc.check_type}>{#each MON_TYPES as mt}<option value={mt}>{mt}</option>{/each}</select>
           <input class="hud-input" placeholder={nc.check_type === 'http' ? 'url' : (nc.check_type === 'tcp' || nc.check_type === 'tls') ? 'port' : '—'} bind:value={nc.target} />
           <input class="hud-input w-20" type="number" placeholder="sec" bind:value={nc.interval_sec} />
-          <button class="hud-btn hud-btn-primary" on:click={addCheck}>+ add</button>
+          <button class="hud-btn hud-btn-primary" on:click={addCheck}>{$t('g.add')}</button>
         </div>
         {#if checkMsg}<div class="text-xs font-mono text-neon-red">{checkMsg}</div>{/if}
       </div>

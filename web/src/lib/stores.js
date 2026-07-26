@@ -17,3 +17,27 @@ export function logout() {
   token.set('')
   user.set(null)
 }
+
+// region theme [DOMAIN(6): Design; CONCEPT(7]: Theme; TECH(6]: svelte/store]
+// Light/dark theme persists in localStorage and is mirrored to <html class="light">. main.js
+// applies the saved class BEFORE mount (no flash); this store drives reactive UI (toggle icon).
+const THEME_KEY = 'vmpulse_theme'
+
+function initialTheme() {
+  return localStorage.getItem(THEME_KEY) === 'light'
+}
+
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light', light)
+}
+
+export const themeLight = writable(initialTheme())
+applyTheme(initialTheme())
+themeLight.subscribe((light) => {
+  applyTheme(light)
+  localStorage.setItem(THEME_KEY, light ? 'light' : 'dark')
+})
+
+export function toggleTheme() {
+  themeLight.update((v) => !v)
+}

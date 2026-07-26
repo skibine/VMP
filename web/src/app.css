@@ -2,9 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/* region theme [DOMAIN(6): Design; CONCEPT(7]: Theming; TECH(7]: css-vars]
+   Colors are space-separated RGB channels (consumed by tailwind.config.js as
+   rgb(var(--token) / <alpha-value>)), so opacity modifiers keep working and a single `.light`
+   class on <html> swaps the whole palette. Toggled from stores.js (theme store, persisted). */
 :root {
   color-scheme: dark;
+  /* dark HUD channels */
+  --hud-bg: 7 10 8;
+  --hud-panel: 12 17 13;
+  --hud-panel2: 16 23 17;
+  --hud-line: 28 42 32;
+  --hud-dim: 91 107 95;
+  --neon-green: 52 211 153;
+  --neon-cyan: 34 211 238;
+  --neon-amber: 251 191 36;
+  --neon-red: 248 113 113;
+  --emerald-100: 209 250 229;
+  --emerald-200: 167 243 208;
+  --grid-line: rgba(28, 42, 32, 0.35);
 }
+
+.light {
+  color-scheme: light;
+  /* light HUD channels — neons darken to -700 shades for WCAG-AA contrast on white;
+     value text (emerald-100/200) flips to dark greens */
+  --hud-bg: 244 246 244;
+  --hud-panel: 255 255 255;
+  --hud-panel2: 238 242 238;
+  --hud-line: 214 221 216;
+  --hud-dim: 100 116 105;
+  --neon-green: 4 120 87;
+  --neon-cyan: 14 116 144;
+  --neon-amber: 180 83 9;
+  --neon-red: 185 28 28;
+  --emerald-100: 4 120 87;
+  --emerald-200: 6 95 70;
+  --grid-line: rgba(15, 23, 20, 0.06);
+}
+
 html,
 body,
 #app {
@@ -15,7 +51,13 @@ body {
   background:
     radial-gradient(1200px 600px at 80% -10%, rgba(34, 211, 238, 0.05), transparent),
     radial-gradient(1000px 500px at -10% 110%, rgba(52, 211, 153, 0.06), transparent),
-    #070a08;
+    rgb(var(--hud-bg));
+}
+.light body {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(8, 145, 178, 0.06), transparent),
+    radial-gradient(1000px 500px at -10% 110%, rgba(5, 150, 105, 0.06), transparent),
+    rgb(var(--hud-bg));
 }
 
 /* region HUD [DOMAIN(6): Design; CONCEPT(7]: HUD; TECH(7]: tailwind] */
@@ -37,8 +79,8 @@ body {
   }
   .hud-grid {
     background-image:
-      linear-gradient(rgba(28, 42, 32, 0.35) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(28, 42, 32, 0.35) 1px, transparent 1px);
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
     background-size: 28px 28px;
   }
   .scan {

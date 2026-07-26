@@ -1,23 +1,31 @@
 /** @type {import('tailwindcss').Config} */
-// region tailwind [DOMAIN(6): Design; CONCEPT(7]: HUD; TECH(7]: tailwind]
-// HUD palette: near-black canvas, emerald/cyan neon, amber/red/slate health.
+// region tailwind [DOMAIN(6): Design; CONCEPT(7]: Theming; TECH(7]: tailwind,css-vars]
+// HUD palette is CSS-variable-backed (space-separated RGB channels) so a `.light` class on
+// <html> can swap the whole theme with ZERO component changes. Opacity modifiers (/40, /80, ...)
+// keep working via the <alpha-value> placeholder. Channels are defined in app.css (:root = dark,
+// .light = light). emerald-100/200 are also themed (used for value text across components).
 export default {
   content: ['./index.html', './src/**/*.{svelte,js}'],
   theme: {
     extend: {
       colors: {
         hud: {
-          bg: '#070a08',
-          panel: '#0c110d',
-          panel2: '#101711',
-          line: '#1c2a20',
-          dim: '#5b6b5f'
+          bg: 'rgb(var(--hud-bg) / <alpha-value>)',
+          panel: 'rgb(var(--hud-panel) / <alpha-value>)',
+          panel2: 'rgb(var(--hud-panel2) / <alpha-value>)',
+          line: 'rgb(var(--hud-line) / <alpha-value>)',
+          dim: 'rgb(var(--hud-dim) / <alpha-value>)'
         },
         neon: {
-          green: '#34d399',
-          cyan: '#22d3ee',
-          amber: '#fbbf24',
-          red: '#f87171'
+          green: 'rgb(var(--neon-green) / <alpha-value>)',
+          cyan: 'rgb(var(--neon-cyan) / <alpha-value>)',
+          amber: 'rgb(var(--neon-amber) / <alpha-value>)',
+          red: 'rgb(var(--neon-red) / <alpha-value>)'
+        },
+        // Override only the two emerald shades used for value text so they theme too.
+        emerald: {
+          100: 'rgb(var(--emerald-100) / <alpha-value>)',
+          200: 'rgb(var(--emerald-200) / <alpha-value>)'
         }
       },
       fontFamily: {

@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js'
   import { token, user } from '../lib/stores.js'
+  import { t } from '../lib/i18n.js'
 
   let username = ''
   let password = ''
@@ -59,23 +60,23 @@
   >
     <div class="space-y-1">
       <div class="hud-label">// VM PULSE</div>
-      <h1 class="text-2xl font-mono text-neon-green tracking-wide">ACCESS&nbsp;TERMINAL</h1>
-      <p class="text-xs text-hud-dim">{twoFA ? 'Enter your authenticator code.' : 'Authenticate to enter the control plane.'}</p>
+      <h1 class="text-2xl font-mono text-neon-green tracking-wide">{$t('login.title')}</h1>
+      <p class="text-xs text-hud-dim">{twoFA ? $t('login.codePrompt') : $t('login.passPrompt')}</p>
     </div>
 
     {#if twoFA}
       <label class="block space-y-1">
-        <span class="hud-label">2fa code (or backup code)</span>
+        <span class="hud-label">{$t('login.codeLabel')}</span>
         <input class="hud-input" bind:value={code} autocomplete="one-time-code" placeholder="123456" />
       </label>
     {:else}
       <label class="block space-y-1">
-        <span class="hud-label">username</span>
+        <span class="hud-label">{$t('login.username')}</span>
         <input class="hud-input" bind:value={username} autocomplete="username" placeholder="owner" />
       </label>
 
       <label class="block space-y-1">
-        <span class="hud-label">password</span>
+        <span class="hud-label">{$t('login.password')}</span>
         <input
           class="hud-input"
           type="password"
@@ -93,10 +94,10 @@
     {/if}
 
     <button class="hud-btn hud-btn-primary w-full" disabled={busy}>
-      {busy ? (twoFA ? 'verifying…' : 'connecting…') : (twoFA ? 'verify' : 'connect')}
+      {busy ? (twoFA ? $t('login.verifying') : $t('login.connecting')) : (twoFA ? $t('login.verify') : $t('login.connect'))}
     </button>
     {#if twoFA}
-      <button type="button" class="hud-btn w-full" on:click={backToPassword}>← back</button>
+      <button type="button" class="hud-btn w-full" on:click={backToPassword}>{$t('login.back')}</button>
     {/if}
   </form>
 </div>
