@@ -70,6 +70,19 @@ func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
  FROM users WHERE id = ?`, id)
 }
 
+// SetPassword updates a user's password hash (argon2id). Used by the change-password endpoint.
+func (s *Store) SetPassword(ctx context.Context, userID int64, passwordHash string) error {
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE users SET password_hash=?, password_algo='argon2id' WHERE id=?`, passwordHash, userID)
+	if err != nil {
+		return fmt.Errorf("SetPassword: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // CountUsers returns the total number of users (used by bootstrap).
 func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 	var n int64

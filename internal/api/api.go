@@ -76,6 +76,7 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/auth/2fa/setup", srv.twoFASetup)
 	mux.HandleFunc("POST /api/auth/2fa/enable", srv.twoFAEnable)
 	mux.HandleFunc("POST /api/auth/2fa/disable", srv.twoFADisable)
+	mux.HandleFunc("PUT /api/auth/password", srv.changePassword)
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
 	RegisterCRUD(mux, s, logger)                    // TODO(auth): wrap CRUD routes with Plane B session middleware
 	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset

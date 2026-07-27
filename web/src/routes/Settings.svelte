@@ -48,6 +48,30 @@
     }
   }
 
+  // Account: change own password (bootstrap prints "change after first login" -> this is where).
+  let pwCurrent = ''
+  let pwNext = ''
+  let pwMsg = ''
+  let pwOk = false
+  let pwBusy = false
+  async function changePassword() {
+    pwMsg = ''
+    pwOk = false
+    if (pwNext.length < 8) { pwMsg = $t('set.pwTooShort'); return }
+    pwBusy = true
+    try {
+      await api.changePassword(pwCurrent, pwNext)
+      pwOk = true
+      pwMsg = $t('set.pwChanged')
+      pwCurrent = ''
+      pwNext = ''
+    } catch (e) {
+      pwMsg = e.message || $t('set.pwFail')
+    } finally {
+      pwBusy = false
+    }
+  }
+
   function onProviderSelect(e) {
     const id = e.currentTarget.value
     const p = providers.find((x) => x.id === id) || providers[providers.length - 1]
@@ -172,7 +196,26 @@
   onMount(load2FA)
 </script>
 
-<div class="max-w-3xl mx-auto space-y-6">
+<div class="max-w-5xl mx-auto space-y-6">
+  <section class="hud-panel p-5 space-y-3">
+    <div class="hud-label text-neon-cyan">{$t('set.pwTitle')}</div>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block space-y-1">
+        <span class="hud-label">{$t('set.pwCurrent')}</span>
+        <input class="hud-input" type="password" bind:value={pwCurrent} autocomplete="current-password" placeholder="••••••••" />
+      </label>
+      <label class="block space-y-1">
+        <span class="hud-label">{$t('set.pwNew')}</span>
+        <input class="hud-input" type="password" bind:value={pwNext} autocomplete="new-password" placeholder="••••••••" />
+      </label>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="hud-btn hud-btn-primary" on:click={changePassword} disabled={pwBusy || !pwCurrent || !pwNext}>{pwBusy ? '…' : $t('set.pwSubmit')}</button>
+      {#if pwMsg}<span class="text-xs font-mono {pwOk ? 'text-neon-green' : 'text-neon-red'}">{pwMsg}</span>{/if}
+    </div>
+    <p class="text-[11px] text-hud-dim">// {$t('set.pwHint')}</p>
+  </section>
+
   <section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('set.aiTitle')}</div>
 

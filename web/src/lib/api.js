@@ -36,6 +36,8 @@ export const api = {
   logout: () => req('/api/auth/logout', { method: 'POST' }).catch(() => {}),
   me: () => req('/api/auth/me'),
   twoFAStatus: () => req('/api/auth/2fa/status'),
+  changePassword: (currentPassword, newPassword) =>
+    req('/api/auth/password', { method: 'PUT', body: { current_password: currentPassword, new_password: newPassword } }),
   twoFASetup: () => req('/api/auth/2fa/setup', { method: 'POST' }),
   twoFAEnable: (code) => req('/api/auth/2fa/enable', { method: 'POST', body: { code } }),
   twoFADisable: (password) => req('/api/auth/2fa/disable', { method: 'POST', body: { password } }),

@@ -66,7 +66,7 @@
   $: certColor = (s) => s === 'expired' ? 'text-neon-red' : s === 'expiring' ? 'text-neon-amber' : s === 'ok' ? 'text-neon-green' : 'text-hud-dim'
 </script>
 
-<div class="h-full overflow-auto p-4 space-y-4">
+<div class="h-full overflow-auto p-4 space-y-4 max-w-5xl mx-auto">
   <div class="hud-panel p-4 space-y-3">
     <div class="flex items-center gap-2">
       <h2 class="font-mono text-neon-green text-lg">{$t('dom.title', { n: domains.length })}</h2>

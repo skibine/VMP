@@ -294,6 +294,46 @@ func (s *Server) twoFADisable(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"disabled": true})
 }
 
+// changePassword lets an authenticated user rotate their own password. Requires the current
+// password (re-auth) so a hijacked session cookie alone cannot change it.
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	uid, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct {
+		Current string `json:"current_password"`
+		Next    string `json:"new_password"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	u, err := s.store.GetUser(r.Context(), uid)
+	if err != nil || !auth.VerifyPassword(body.Current, u.PasswordHash) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+		return
+	}
+	if len(body.Next) < 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password must be at least 8 characters"})
+		return
+	}
+	hash, err := auth.HashPassword(body.Next)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "hash failed"})
+		return
+	}
+	if err := s.store.SetPassword(r.Context(), uid, hash); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = audit.Append(s.store.DB, s.logger, audit.Entry{
+		Plane: audit.PlaneB, UserID: uid, Action: "auth.password_change", Success: true,
+	})
+	logging.LDD(s.logger, 9, "auth", "PASSWORD_CHANGED", fmt.Sprintf("uid=%d", uid))
+	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
+}
+
 // generateBackupCodes returns N plaintext one-time codes and their argon2id hashes.
 func generateBackupCodes(n int) ([]string, []string, error) {
 	enc := base32.StdEncoding.WithPadding(base32.NoPadding)
