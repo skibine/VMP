@@ -590,6 +590,13 @@
       </section>
     {/if}
 
+    <!-- Plane A divider: monitoring (no credentials) -->
+    <div class="flex items-center gap-2 pt-1">
+      <span class="hud-label text-neon-cyan">{$t('vd.planeA')}</span>
+      <span class="text-[10px] text-hud-dim">// {$t('vd.planeAHint')}</span>
+      <span class="flex-1 h-px bg-hud-line"></span>
+    </div>
+
     <!-- Status battery (auto-run on select) + one-shot tools -->
     <div class="grid grid-cols-2 gap-3">
       <section class="hud-panel p-3 space-y-2">
@@ -608,7 +615,7 @@
           <div class="flex flex-wrap gap-1.5">
             {#each battery.probes as p}
               <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono" title={probeHint(p.name)}>
-                <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-hud-dim'}">{p.status === 'ok' ? '✓' : '✗'}</span>
+                <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-neon-red'}">{p.status === 'ok' ? '✓' : '✗'}</span>
                 <span class="text-hud-dim">{p.name === 'ssh' ? 'ssh:' + (vm.port_ssh || 22) : p.name}</span>
                 {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
               </div>
@@ -721,6 +728,13 @@
         {/if}
       </section>
     {/if}
+
+    <!-- Plane B divider: management (requires SSH credentials) -->
+    <div class="flex items-center gap-2 pt-1">
+      <span class="hud-label text-neon-amber">{$t('vd.planeB')}</span>
+      <span class="text-[10px] text-hud-dim">// {$t('vd.planeBHint')}</span>
+      <span class="flex-1 h-px bg-hud-line"></span>
+    </div>
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
