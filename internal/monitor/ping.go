@@ -1,100 +1,80 @@
-// Package monitor — ICMP ping checker.
+// Package monitor — ICMP ping checker (via the system ping binary).
 //
-// region MODULE_CONTRACT [DOMAIN(7): Monitoring; CONCEPT(7): ICMP; TECH(8): x/net/icmp]
-// @purpose Measure ICMP echo round-trip latency. Uses unprivileged ICMP (SOCK_DGRAM) which
+// region MODULE_CONTRACT [DOMAIN(7): Monitoring; CONCEPT(7): ICMP; TECH(7): os/exec]
+// @purpose Measure ICMP echo reachability + RTT by invoking the host's native `ping` command.
 //
-//	requires the process to be in the host's ping_group_range (or CAP_NET_RAW).
+//	Why not raw sockets: Go's x/net/icmp unprivileged (SOCK_DGRAM) mode works on Linux but NOT on
+//	Windows (Windows doesn't implement that socket type), and raw ICMP needs admin everywhere.
+//	The system `ping` binary works for every unprivileged user on every OS — on Windows ping.exe
+//	uses IcmpSendEcho via the system ICMP API, on Linux/macOS the ping binary carries CAP_NET_RAW.
 //
 // @invariants
-//   - If the host does not permit unprivileged ICMP, the result is StatusUnknown with the
-//     reason (NOT critical) — this is an environment limitation, not a target failure.
-//   - Empty target -> unknown.
+//   - ping binary not found on host -> StatusUnknown (environment limitation, not a target failure).
+//   - ping ran but no reply -> StatusCritical (host down / dropping ICMP).
+//   - Exit 0 + a parsed latency -> StatusOK.
 //
 // endregion MODULE_CONTRACT
-// GREP_SUMMARY: ping, icmp, echo, rtt, latency, unprivileged, CAP_NET_RAW
-// STRUCTURE: ▶ ┌target┐ → ○ icmp.ListenPacket(udp4) → ⚡ Echo WriteTo → ⊕ ReadFrom → ⎋ RTT
+// GREP_SUMMARY: ping, icmp, echo, rtt, latency, exec, system ping, windows, cross-platform
+// STRUCTURE: ▶ ┌target┐ → ○ exec ping (-n/-c 1) → 〈exit 0? up : down〉 → ⊕ parse time=Xms → ⎷ Result
 package monitor
 
 import (
 	"context"
-	"net"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 )
 
-// pingID seeds a per-process echo ID (incremented per probe).
-var pingID uint32
-
-// region STRUCT_PingChecker [DOMAIN(7): Monitoring; CONCEPT(6): Plugin; TECH(8): x/net/icmp]
-// @purpose ICMP echo (ping) checker.
+// region STRUCT_PingChecker [DOMAIN(7): Monitoring; CONCEPT(6): Plugin; TECH(7): os/exec]
+// @purpose ICMP echo (ping) checker via the system ping binary.
 // endregion STRUCT_PingChecker
 type PingChecker struct{}
 
 func (PingChecker) Type() string { return "ping" }
 
-// region FUNC_PingChecker_Run [DOMAIN(7): Monitoring; CONCEPT(7): Probe; TECH(8): x/net/icmp]
-// @purpose Send one ICMP echo and measure the RTT.
-// @complexity 6
+// rePingRTT matches "135ms" / "135.4 ms" / "135мс" / "135 мсек" anywhere in ping output, so it works
+// across locales (English "time=135ms", Russian "время=135мс", etc.). TTL/bytes numbers lack the
+// ms unit, so they never match.
+var rePingRTT = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(ms|мсек|мс)`)
+
+// region FUNC_PingChecker_Run [DOMAIN(7): Monitoring; CONCEPT(7): Probe; TECH(7): os/exec]
+// @purpose Run the system ping once against the target and derive status + latency from its output.
+// @complexity 4
 // endregion FUNC_PingChecker_Run
 func (PingChecker) Run(ctx context.Context, target string, params map[string]any) Result {
 	if strings.TrimSpace(target) == "" {
 		return Result{Status: StatusUnknown, Message: "empty target"}
 	}
 	timeout := timeoutOf(params, 5*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	c, err := icmp.ListenPacket("udp4", "0.0.0.0")
+	// Windows: ping -n 1 -w <ms>. Unix: ping -c 1 -W <sec>.
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(cctx, "ping", "-n", "1", "-w", strconv.FormatInt(timeout.Milliseconds(), 10), target)
+	} else {
+		cmd = exec.CommandContext(cctx, "ping", "-c", "1", "-W", strconv.FormatInt(int64(timeout.Seconds()), 10), target)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Environment cannot do unprivileged ICMP — surface as unknown, not a target failure.
-		return Result{Status: StatusUnknown,
-			Message: "icmp unavailable (need ping_group_range or CAP_NET_RAW): " + err.Error()}
-	}
-	defer c.Close()
-
-	dst, err := net.ResolveIPAddr("ip4", target)
-	if err != nil {
-		return Result{Status: StatusCritical, Message: "resolve: " + err.Error()}
-	}
-	_ = c.SetDeadline(time.Now().Add(timeout))
-
-	id := int(atomic.AddUint32(&pingID, 1) & 0xffff)
-	msg := icmp.Message{
-		Type: ipv4.ICMPTypeEcho, Code: 0,
-		Body: &icmp.Echo{ID: id, Seq: 1, Data: []byte("VMPULSE-PING")},
-	}
-	wb, err := msg.Marshal(nil)
-	if err != nil {
-		return Result{Status: StatusUnknown, Message: "marshal: " + err.Error()}
-	}
-	start := time.Now()
-	if _, err := c.WriteTo(wb, dst); err != nil {
-		// Could not even send the ICMP packet: an environment limitation (sandbox/seccomp), not a
-		// target failure -> unknown, with a human-readable reason.
-		return Result{Status: StatusUnknown, Message: "icmp blocked on this host (VM Pulse server needs ping_group_range or CAP_NET_RAW)"}
-	}
-	rb := make([]byte, 1500)
-	n, peer, err := c.ReadFrom(rb)
-	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	if err != nil {
-		// Sent but no reply: host may be down or dropping ICMP -> critical.
-		return Result{Status: StatusCritical, LatencyMS: latency, Message: "no reply (host down or dropping icmp)",
+		// No ping binary on the host (rare — minimal container) = environment limitation, not down.
+		if execErr, ok := err.(*exec.Error); ok && execErr.Err == exec.ErrNotFound {
+			return Result{Status: StatusUnknown, Message: "ping binary not found on this host"}
+		}
+		// ping ran but exited non-zero: no reply (host down, unreachable, or dropping ICMP).
+		return Result{Status: StatusCritical, Message: "no reply (host down or unreachable)",
 			Detail: map[string]any{"target": target}}
 	}
-	rm, err := icmp.ParseMessage(1, rb[:n]) // 1 = ICMPv4 protocol number
-	if err != nil {
-		return Result{Status: StatusUnknown, Message: "parse: " + err.Error()}
+	latency := 0.0
+	if m := rePingRTT.FindStringSubmatch(string(out)); len(m) == 3 {
+		latency, _ = strconv.ParseFloat(m[1], 64)
 	}
-	if rm.Type != ipv4.ICMPTypeEchoReply {
-		return Result{Status: StatusCritical, LatencyMS: latency, Message: "non-echo-reply",
-			Detail: map[string]any{"target": target, "type": rm.Type}}
-	}
-	peerStr := ""
-	if peer != nil {
-		peerStr = peer.String()
-	}
-	return Result{Status: StatusOK, LatencyMS: latency, Message: "echo reply",
-		Detail: map[string]any{"target": target, "peer": peerStr}}
+	return Result{Status: StatusOK, LatencyMS: latency,
+		Message: fmt.Sprintf("echo reply %.0fms", latency),
+		Detail: map[string]any{"target": target}}
 }
