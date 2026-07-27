@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -100,13 +101,23 @@ type OpenAIProvider struct {
 	HTTP   *http.Client
 }
 
+// llmTimeout picks a generous ceiling for local LLM servers (Ollama/LM Studio/vLLM on localhost):
+// their cold start (model load into RAM/VRAM) + CPU inference can take minutes on the first turn,
+// which blows past a cloud-tuned 60s. Cloud APIs answer in seconds, so the ceiling never bites them.
+func llmTimeout(apiURL string) time.Duration {
+	if strings.Contains(apiURL, "127.0.0.1") || strings.Contains(apiURL, "localhost") || strings.Contains(apiURL, "[::1]") {
+		return 5 * time.Minute
+	}
+	return 60 * time.Second
+}
+
 // region FUNC_OpenAIProvider_Chat [DOMAIN(8): AI; CONCEPT(7): Call; TECH(8): net/http]
 // @purpose POST {APIURL}/chat/completions and parse the assistant turn.
 // @complexity 5
 // endregion FUNC_OpenAIProvider_Chat
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	if p.HTTP == nil {
-		p.HTTP = &http.Client{Timeout: 60 * time.Second}
+		p.HTTP = &http.Client{Timeout: llmTimeout(p.APIURL)}
 	}
 	body := openAIReq{
 		Model:      req.Model,
