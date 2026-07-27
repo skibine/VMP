@@ -166,6 +166,33 @@ func (s *Store) EnsureSystemExposures(ctx context.Context, vmID int64) error {
 	return err
 }
 
+// EnsureDomainChecks makes sure a domain has the system whois (registration expiry) + tls
+// (certificate expiry) checks at a 6h cadence. These drive expiry alert rules: the whois checker
+// goes warn when registration < warn_days, the tls checker when the cert < warn_days. Idempotent.
+func (s *Store) EnsureDomainChecks(ctx context.Context, domainID int64) error {
+	for _, spec := range []struct {
+		ctype    string
+		warnDays int
+	}{
+		{"whois", 30},
+		{"tls", 14},
+	} {
+		var n int
+		_ = s.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM checks WHERE domain_id=? AND system=1 AND check_type=?`, domainID, spec.ctype).Scan(&n)
+		if n > 0 {
+			continue
+		}
+		if _, err := s.CreateCheck(ctx, Check{
+			DomainID: &domainID, TargetType: "domain", CheckType: spec.ctype, Enabled: true,
+			IntervalSec: 6 * 3600, System: true, Params: map[string]any{"warn_days": spec.warnDays},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SystemCheckID returns the id of a VM's system check of the given type (e.g. "exposures"),
 // or 0 if none exists. Used so an on-demand scan can persist its result into the right check.
 func (s *Store) SystemCheckID(ctx context.Context, vmID int64, checkType string) (int64, error) {

@@ -338,6 +338,7 @@ func (a *crudAPI) createDomain(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "createDomain", err)
 		return
 	}
+	_ = a.st.EnsureDomainChecks(r.Context(), id)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 

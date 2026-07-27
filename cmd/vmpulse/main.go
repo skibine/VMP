@@ -127,6 +127,13 @@ func main() {
 			_ = s.EnsureSystemExposures(context.Background(), vm.ID)
 		}
 	}
+	// Same for domains: backfill the system whois (registration expiry) + tls (cert expiry) checks
+	// so existing domains get expiry monitoring without re-adding them.
+	if doms, err := s.ListDomains(context.Background()); err == nil {
+		for _, d := range doms {
+			_ = s.EnsureDomainChecks(context.Background(), d.ID)
+		}
+	}
 
 	// Plane A alert evaluator (consumes results, fires alerts to channels).
 	ev := alerts.New(s, alerts.DefaultRegistry(logger), logger, 30*time.Second)

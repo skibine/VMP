@@ -128,11 +128,21 @@
       </aside>
     </main>
   {:else if view === 'alerts'}
-    <!-- alerts (full width) -->
-    <main class="flex-1 min-h-0 overflow-hidden">
-      <section class="overflow-auto hud-grid min-h-0">
+    <!-- alerts + chat (resizable) -->
+    <main class="flex-1 flex min-h-0 overflow-hidden">
+      <section class="overflow-auto hud-grid min-h-0 flex-1">
         <Alerts />
       </section>
+      <div
+        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
+        role="separator"
+        aria-orientation="vertical"
+        on:mousedown={startDrag}
+        title="drag to resize chat"
+      ></div>
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
+        <ChatPanel />
+      </aside>
     </main>
   {:else}
     <!-- settings + chat (resizable) -->

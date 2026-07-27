@@ -57,11 +57,44 @@ type CertInfo struct {
 
 // WhoisInfo is the parsed registrar record.
 type WhoisInfo struct {
-	Registrar string `json:"registrar"`
-	Created   string `json:"created"`
-	Expiry    string `json:"expiry"`
-	Status    string `json:"status"` // ok | error
-	Error     string `json:"error,omitempty"`
+	Registrar    string `json:"registrar"`
+	Created      string `json:"created"`
+	Expiry       string `json:"expiry"`
+	DaysRemaining int   `json:"days_remaining"` // -1 when expiry unparseable
+	Status       string `json:"status"` // ok | error
+	Error        string `json:"error,omitempty"`
+}
+
+// expiryDateLayouts are the common registrar date formats (tried in order). Whois responses vary
+// wildly across TLDs; this covers the dominant ones (.com/.net Verisign, .ru/.de numeric, ISO, etc.).
+var expiryDateLayouts = []string{
+	time.RFC3339,
+	"2006-01-02T15:04:05Z",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+	"02-Jan-2006",
+	"02-Jan-2006 15:04:05",
+	"02.01.2006",
+	"02.01.2006 15:04:05",
+	"2006/01/02",
+	"January 2 2006",
+	"2 January 2006",
+	"02-Jan-06",
+}
+
+// parseExpiryDate parses a registrar expiry string into a time.Time (best-effort). ok=false when no
+// layout matches (rare TLDs) — callers treat that as "no expiry known" rather than expired.
+func parseExpiryDate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range expiryDateLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // region FUNC_ProbeDomain [DOMAIN(8): Observability; CONCEPT(7): DomainInfo; TECH(8): net,tls,whois]
