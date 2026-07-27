@@ -17,13 +17,23 @@
   // the scroll — the classic autoscroll bug. So we remember "was the user at the bottom?" and
   // re-apply scrollTop=scrollHeight on every update while stick is true. Scrolling up clears stick,
   // so reading history is never interrupted.
+  //
+  // forceScroll: an active conversation turn (the user's own message, or the assistant's reply they
+  // are waiting for) must ALWAYS scroll into view — even if the user scrolled up during a long
+  // (local-LLM) wait. Without this, a reply that arrives after a slow Ollama turn lands below the
+  // fold and looks like "no answer" until a tab switch remounts.
   let scroller = null
   let stick = true
+  let forceScroll = false
   function onScrollerScroll() {
     if (!scroller) return
     stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120
   }
-  afterUpdate(() => { if (stick && scroller) scroller.scrollTop = scroller.scrollHeight })
+  afterUpdate(() => {
+    if (!scroller) return
+    if (forceScroll || stick) scroller.scrollTop = scroller.scrollHeight
+    forceScroll = false
+  })
 
   // Persist chat to localStorage so it survives reloads (history is in-memory on the server side too).
   const STORE_KEY = 'vmp_chat'
@@ -86,6 +96,7 @@
   // text, or a synthetic system-injected note). Used by send() and by the post-approve continuation.
   async function askAI(text, userMsg) {
     messages = [...messages, userMsg]
+    forceScroll = true
     persist()
     busy = true
     try {
@@ -97,6 +108,7 @@
       const res = await api.aiChat(text, history)
       const parsed = parseReply(res.reply || '')
       messages = [...messages, { role: 'assistant', text: parsed.text, artifact: parsed.artifact, trace: res.trace || [] }]
+      forceScroll = true
       persist()
     } catch (e) {
       messages = [...messages, { role: 'assistant', text: '⚠ ' + e.message, artifact: null, trace: [] }]

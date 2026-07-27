@@ -149,7 +149,7 @@ func main() {
 	seedAI(ctx, s, cfg, logger)
 	// AI executor wraps the SSH dialer so approved (or auto-approved) commands can run on VMs.
 	sshDialer := ssh.New(s, logger)
-	aiRegistry := ai.NewRegistry(append(ai.StoreTools(s), ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
+	aiRegistry := ai.NewRegistry(append(append(ai.StoreTools(s), ai.HostProbeTools()...), ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
 	server.WithAgent(&ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger})
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and

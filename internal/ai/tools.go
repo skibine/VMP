@@ -18,9 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/skibine/vm-pulse/internal/health"
+	"github.com/skibine/vm-pulse/internal/monitor"
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
@@ -244,6 +247,48 @@ func StoreTools(s *store.Store) []Tool {
 					out = append(out, a)
 				}
 				return jsonStr(out)
+			},
+		},
+	}
+}
+
+// HostProbeTools returns Plane A tools that probe a target FROM the VM Pulse host itself — no VM
+// credentials needed and no ai_access required. These are what let the assistant "ping"/check ANY
+// target (a VM IP, a domain, an external host) even when no VM has SSH access granted: the host can
+// always reach the network. TCP-based, so they work on Windows without elevation (unlike ICMP).
+func HostProbeTools() []Tool {
+	return []Tool{
+		{
+			Name: "probe_host",
+			Description: "Probe any host (IP or hostname) directly from the VM Pulse host — NO VM credentials and NO ai_access needed. " +
+				"Runs a TCP port scan of common ports (22/80/443/3306/...) plus a curated security exposure scan. " +
+				"This is how you check reachability (the 'ping' question) and exposures of ANY target: a VM IP you have no SSH access to, a domain, or an external host. " +
+				"If at least one common port answers, the host is UP. Use this instead of trying to run ping over SSH.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target": map[string]any{"type": "string", "description": "IP address or hostname to probe"},
+				},
+				"required": []string{"target"},
+			},
+			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				target, _ := args["target"].(string)
+				target = strings.TrimSpace(target)
+				if target == "" {
+					return "", fmt.Errorf("target is required")
+				}
+				ports := monitor.PortScan(ctx, target, 8*time.Second)
+				findings := monitor.Exposures(ctx, target, 8*time.Second)
+				open := 0
+				for _, p := range ports {
+					if p.Open {
+						open++
+					}
+				}
+				return jsonStr(map[string]any{
+					"target": target, "up": open > 0, "open_ports": open,
+					"ports": ports, "exposures": findings,
+				})
 			},
 		},
 	}
