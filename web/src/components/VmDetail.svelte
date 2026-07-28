@@ -301,6 +301,11 @@
       health = h
       results = r || []
       checks = c || []
+      // Pre-fill the exposures panel with the LAST stored scan (from the periodic exposures check),
+      // so it isn't empty on VM open — the "scan" button re-runs fresh. The findings live in the
+      // check result's latest_detail.findings.
+      const expStored = (r || []).find((x) => x.check_type === 'exposures' && x.latest_detail?.findings)
+      if (expStored) exposures = { findings: expStored.latest_detail.findings, busy: false, err: '' }
       cred = { ssh_user: cr.ssh_user || '', auth_type: cr.auth_type || 'password', has_secret: !!cr.has_secret, has_sudo: !!cr.has_sudo, secret: '', sudo_password: '', msg: '', ok: false, busy: false }
       system = cr.inventory || null
       if (v) {

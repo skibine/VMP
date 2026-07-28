@@ -51,9 +51,17 @@ var curatedProbes = []exposureProbe{
 	probeDockerAPI,
 	probeK8sAPI,
 	probeElasticsearch,
+	probeMongoDB,
+	probeEtcd,
 	probeMemcached,
 	probeVNC,
 	probeTelnet,
+	probeFTP,
+	probeRDP,
+	probeCouchDB,
+	probeRabbitMQ,
+	probeClickHouse,
+	probeActuator,
 	probeGitExposed,
 	probeEnvExposed,
 	probeWeakTLS,
@@ -314,6 +322,184 @@ func weakTLSAt(ctx context.Context, addr string) *Finding {
 }
 
 // endregion probes
+
+// --- extended probe set (common no-auth / RCE-grade exposures) ---
+
+func probeMongoDB(ctx context.Context, host string) *Finding { return mongoAt(ctx, net.JoinHostPort(host, "27017")) }
+func mongoAt(ctx context.Context, addr string) *Finding {
+	// Send a legacy OP_QUERY {isMaster:1}; an exposed MongoDB answers with server info (BSON).
+	d := net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	_ = conn.SetWriteDeadline(time.Now().Add(probeTimeout))
+	if _, err := conn.Write(mongoIsMasterQuery()); err != nil {
+		return nil
+	}
+	buf := make([]byte, 512)
+	_ = conn.SetReadDeadline(time.Now().Add(probeTimeout))
+	n, _ := conn.Read(buf)
+	if n == 0 {
+		return nil
+	}
+	return &Finding{ID: "mongodb-open", Severity: "critical",
+		Title:  "MongoDB exposed to the internet",
+		Detail: "Port :27017 answered a MongoDB isMaster handshake — the database faces the internet (the 2017 'MongoDB Apocalypse' wiped thousands of these). Bind to localhost/VPN; enable auth."}
+}
+
+// mongoIsMasterQuery builds a legacy OP_QUERY {isMaster:1} against admin.$cmd (little-endian).
+func mongoIsMasterQuery() []byte {
+	bson := []byte{19, 0, 0, 0, 0x10,
+		'i', 's', 'M', 'a', 's', 't', 'e', 'r', 0,
+		1, 0, 0, 0, 0}
+	body := []byte{0, 0, 0, 0} // flags
+	body = append(body, []byte("admin.$cmd")...)
+	body = append(body, 0)        // NUL terminator
+	body = append(body, 0, 0, 0, 0) // numberToSkip
+	body = append(body, 1, 0, 0, 0) // numberToReturn = 1
+	body = append(body, bson...)
+	total := 16 + len(body)
+	hdr := []byte{byte(total), byte(total >> 8), byte(total >> 16), byte(total >> 24),
+		1, 0, 0, 0, 0, 0, 0, 0, 0xD4, 0x07, 0, 0} // opCode 2004
+	return append(hdr, body...)
+}
+
+func probeEtcd(ctx context.Context, host string) *Finding { return etcdAt(ctx, "http://"+host+":2379") }
+func etcdAt(ctx context.Context, baseURL string) *Finding {
+	st, body, err := httpGet(ctx, expHTTP, baseURL+"/version")
+	if err != nil || st != 200 {
+		return nil
+	}
+	if strings.Contains(body, "etcdserver") || strings.Contains(body, "etcdcluster") {
+		return &Finding{ID: "etcd-open", Severity: "critical",
+			Title:  "Exposed etcd (kubernetes secrets)",
+			Detail: "Port :2379 served etcd /version — an unauthenticated etcd exposes all kubernetes Secrets, ConfigMaps and cluster state. Never expose etcd; use mTLS."}
+	}
+	return nil
+}
+
+func probeCouchDB(ctx context.Context, host string) *Finding { return couchAt(ctx, "http://"+host+":5984") }
+func couchAt(ctx context.Context, baseURL string) *Finding {
+	st, body, err := httpGet(ctx, expHTTP, baseURL+"/")
+	if err != nil || st != 200 {
+		return nil
+	}
+	if strings.Contains(body, "couchdb") {
+		return &Finding{ID: "couchdb-open", Severity: "high",
+			Title:  "Exposed CouchDB",
+			Detail: "Port :5984 served a CouchDB welcome — an unauthenticated CouchDB can leak/modify databases. Bind to localhost; enable auth + require_valid_user."}
+	}
+	return nil
+}
+
+func probeRabbitMQ(ctx context.Context, host string) *Finding { return rabbitAt(ctx, "http://"+host+":15672") }
+func rabbitAt(ctx context.Context, baseURL string) *Finding {
+	st, body, err := httpGet(ctx, expHTTP, baseURL+"/api/overview")
+	if err != nil {
+		return nil
+	}
+	// 200 = fully open; 401 = mgmt UI exposed (guest/guest default).
+	if st == 200 || st == 401 {
+		detail := "Port :15672 exposed the RabbitMQ management UI/API. Disable guest/guest, bind to localhost, put behind a reverse proxy with auth."
+		if strings.Contains(body, "rabbitmq_version") {
+			detail = "RabbitMQ management returned cluster info without auth. " + detail
+		}
+		return &Finding{ID: "rabbitmq-open", Severity: "high",
+			Title: "Exposed RabbitMQ management", Detail: detail}
+	}
+	return nil
+}
+
+func probeClickHouse(ctx context.Context, host string) *Finding { return clickAt(ctx, "http://"+host+":8123") }
+func clickAt(ctx context.Context, baseURL string) *Finding {
+	st, _, err := httpGet(ctx, expHTTP, baseURL+"/")
+	if err != nil || st != 200 {
+		return nil
+	}
+	return &Finding{ID: "clickhouse-open", Severity: "high",
+		Title:  "Exposed ClickHouse HTTP",
+		Detail: "Port :8123 answered ClickHouse HTTP — without auth, anyone can run SQL (read/modify data). Bind to localhost; configure users + allowed networks."}
+}
+
+// probeActuator checks Spring Boot Actuator /actuator/env (config + secret leak) on common web ports.
+func probeActuator(ctx context.Context, host string) *Finding {
+	for _, c := range []struct{ scheme, url string }{
+		{"http", "http://" + host + "/actuator/env"},
+		{"https", "https://" + host + "/actuator/env"},
+		{"http", "http://" + host + ":8080/actuator/env"},
+	} {
+		st, body, err := httpGet(ctx, clientFor(c.scheme), c.url)
+		if err != nil || st != 200 {
+			continue
+		}
+		if strings.Contains(body, "propertySources") || strings.Contains(body, "activeProfiles") {
+			return &Finding{ID: "actuator-env", Severity: "critical",
+				Title:  "Exposed Spring Boot Actuator /env",
+				Detail: c.url + " leaked application config (propertySources, incl. DB passwords / secrets). Restrict actuator (management.endpoints.web.exposure.include) + add auth."}
+		}
+	}
+	return nil
+}
+
+func probeFTP(ctx context.Context, host string) *Finding { return ftpAt(ctx, net.JoinHostPort(host, "21")) }
+func ftpAt(ctx context.Context, addr string) *Finding {
+	d := net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	buf := make([]byte, 256)
+	_ = conn.SetReadDeadline(time.Now().Add(probeTimeout))
+	n, _ := conn.Read(buf)
+	if !strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "220") {
+		return nil
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(probeTimeout))
+	_, _ = conn.Write([]byte("USER anonymous\r\n"))
+	_ = conn.SetReadDeadline(time.Now().Add(probeTimeout))
+	n, _ = conn.Read(buf)
+	if !strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "331") {
+		return nil
+	}
+	_, _ = conn.Write([]byte("PASS anonymous@\r\n"))
+	_ = conn.SetReadDeadline(time.Now().Add(probeTimeout))
+	n, _ = conn.Read(buf)
+	if strings.HasPrefix(strings.TrimSpace(string(buf[:n])), "230") {
+		return &Finding{ID: "ftp-anon", Severity: "high",
+			Title:  "Anonymous FTP enabled",
+			Detail: "Port :21 accepted an anonymous login (USER anonymous / PASS anonymous@). Files are readable by anyone — disable anonymous access, or make it read-only + restricted."}
+	}
+	return nil
+}
+
+func probeRDP(ctx context.Context, host string) *Finding { return rdpAt(ctx, net.JoinHostPort(host, "3389")) }
+func rdpAt(ctx context.Context, addr string) *Finding {
+	// RDP: client sends an X.224 Connection Request; the server replies with a TPKT-framed
+	// Connection Confirm (starts 0x03 0x00 ...). Sending the CR and seeing that reply = RDP up.
+	d := net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cr := []byte{0x03, 0x00, 0x00, 0x13, 0x0e, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00}
+	_ = conn.SetWriteDeadline(time.Now().Add(probeTimeout))
+	if _, err := conn.Write(cr); err != nil {
+		return nil
+	}
+	buf := make([]byte, 32)
+	_ = conn.SetReadDeadline(time.Now().Add(probeTimeout))
+	n, _ := conn.Read(buf)
+	if n >= 3 && buf[0] == 0x03 && buf[1] == 0x00 {
+		return &Finding{ID: "rdp-open", Severity: "high",
+			Title:  "RDP exposed to the internet",
+			Detail: "Port :3389 completed an RDP handshake — Remote Desktop faces the internet (prime ransomware entry: BlueKeep, brute-force). Put behind a VPN/gateway; enforce NLA + MFA."}
+	}
+	return nil
+}
 
 func httpGet(ctx context.Context, c *http.Client, rawurl string) (int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawurl, nil)

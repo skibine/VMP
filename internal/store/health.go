@@ -17,6 +17,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -24,23 +25,28 @@ import (
 // @purpose One check of a VM plus its most recent result (fields empty if never run).
 // endregion STRUCT_VMCheckStatus
 type VMCheckStatus struct {
-	CheckID       int64   `json:"check_id"`
-	CheckType     string  `json:"check_type"`
-	Enabled       bool    `json:"enabled"`
-	LatestTS      string  `json:"latest_ts"`
-	LatestStatus  string  `json:"latest_status"` // ok|warn|critical|unknown|""(no run yet)
-	LatestLatency float64 `json:"latest_latency_ms"`
-	LatestMessage string  `json:"latest_message"`
+	CheckID       int64          `json:"check_id"`
+	CheckType     string         `json:"check_type"`
+	Enabled       bool           `json:"enabled"`
+	LatestTS      string         `json:"latest_ts"`
+	LatestStatus  string         `json:"latest_status"` // ok|warn|critical|unknown|""(no run yet)
+	LatestLatency float64        `json:"latest_latency_ms"`
+	LatestMessage string         `json:"latest_message"`
+	LatestDetail  map[string]any `json:"latest_detail,omitempty"`
 }
 
-// region FUNC_LatestResultsForVM [DOMAIN(8): Storage; CONCEPT(7): Read; TECH(8): SQLite,JOIN]
-// @purpose Return each check of the VM joined with its newest check_result row.
+// region FUNC_LatestResultsForVM [DOMAIN(8): Storage; CONCEPT(7]: Read; TECH(8]: SQLite,JOIN]
+// @purpose Return each check of the VM joined with its newest check_result row (incl. the detail
+//
+//	JSON, so callers like the exposures panel can show the last stored findings without a re-scan).
+//
 // @complexity 5
 // endregion FUNC_LatestResultsForVM
 func (s *Store) LatestResultsForVM(ctx context.Context, vmID int64) ([]VMCheckStatus, error) {
 	const q = `
 SELECT c.id, c.check_type, c.enabled,
-       COALESCE(r.ts,''), COALESCE(r.status,''), COALESCE(r.latency_ms,0), COALESCE(r.message,'')
+       COALESCE(r.ts,''), COALESCE(r.status,''), COALESCE(r.latency_ms,0), COALESCE(r.message,''),
+       COALESCE(r.detail,'')
 FROM checks c
 LEFT JOIN check_results r
   ON r.check_id = c.id
@@ -56,16 +62,25 @@ ORDER BY c.id ASC`
 	for rows.Next() {
 		var v VMCheckStatus
 		var enabled int
+		var detailJSON string
 		if err := rows.Scan(&v.CheckID, &v.CheckType, &enabled, &v.LatestTS,
-			&v.LatestStatus, &v.LatestLatency, &v.LatestMessage); err != nil {
+			&v.LatestStatus, &v.LatestLatency, &v.LatestMessage, &detailJSON); err != nil {
 			return nil, fmt.Errorf("LatestResultsForVM scan: %w", err)
 		}
 		v.Enabled = enabled != 0
+		if detailJSON != "" {
+			var d map[string]any
+			if err := json.Unmarshal([]byte(detailJSON), &d); err == nil {
+				v.LatestDetail = d
+			}
+		}
 		out = append(out, v)
 	}
 	return out, rows.Err()
 }
 
+// region FUNC_LatestResultsForVM [DOMAIN(8): Storage; CONCEPT(7): Read; TECH(8): SQLite,JOIN]
+// @purpose Return each check of the VM joined with its newest check_result row.
 // VMExists reports whether a VM with the given id exists (any archive state).
 func (s *Store) VMExists(ctx context.Context, vmID int64) (bool, error) {
 	var one int
