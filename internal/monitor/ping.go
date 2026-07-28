@@ -21,6 +21,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -28,6 +29,19 @@ import (
 	"strings"
 	"time"
 )
+
+// windowsPing returns the absolute path to ping.exe via %SystemRoot% (always set on Windows),
+// bypassing PATH/PATHEXT resolution — Go's exec.Command("ping") sometimes fails to find ping.exe
+// even though System32 is in PATH. Falls back to the bare "ping" name if SystemRoot is unset.
+func windowsPing() string {
+	if sr := os.Getenv("SystemRoot"); sr != "" {
+		p := sr + `\System32\ping.exe`
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "ping"
+}
 
 // region STRUCT_PingChecker [DOMAIN(7): Monitoring; CONCEPT(6): Plugin; TECH(7): os/exec]
 // @purpose ICMP echo (ping) checker via the system ping binary.
@@ -56,7 +70,7 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 	// Windows: ping -n 1 -w <ms>. Unix: ping -c 1 -W <sec>.
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cctx, "ping", "-n", "1", "-w", strconv.FormatInt(timeout.Milliseconds(), 10), target)
+		cmd = exec.CommandContext(cctx, windowsPing(), "-n", "1", "-w", strconv.FormatInt(timeout.Milliseconds(), 10), target)
 	} else {
 		cmd = exec.CommandContext(cctx, "ping", "-c", "1", "-W", strconv.FormatInt(int64(timeout.Seconds()), 10), target)
 	}
