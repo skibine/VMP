@@ -604,6 +604,8 @@
       <span class="flex-1 h-px bg-hud-line"></span>
     </div>
 
+    <!-- battery + ip/info: equal-width narrow panels (side by side) so content is dense, not spread wide -->
+    <div class="grid grid-cols-2 gap-2">
     <!-- Liveness // probe: battery (auto snapshot) + manual probe (collapsible) -->
     <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
@@ -676,6 +678,7 @@
         {/if}
       </section>
     {/if}
+    </div>
 
     <!-- Ports // exposed (external scan, Plane A, no creds) -->
     <section class="hud-panel p-2.5 space-y-1.5">
