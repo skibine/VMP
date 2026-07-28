@@ -604,38 +604,37 @@
       <span class="flex-1 h-px bg-hud-line"></span>
     </div>
 
-    <!-- Status battery (auto-run on select) + one-shot tools -->
-    <div class="grid grid-cols-2 gap-3">
-      <section class="hud-panel p-3 space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="hud-label text-neon-cyan">{$t('vd.statusBattery')}</span>
-          {#if !battery.busy && battery.probes.length}
-            <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? $t('vd.up') : $t('vd.down')} · <span class="normal-case">{livenessEvidence}</span></span>
-          {/if}
-          <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
-        </div>
-        {#if battery.busy}
-          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.probingBattery')}</div>
-        {:else if battery.err}
-          <div class="text-xs font-mono text-neon-red">{battery.err}</div>
-        {:else}
-          <div class="flex flex-wrap gap-1.5">
-            {#each battery.probes as p}
-              <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono" title={probeHint(p.name)}>
-                <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-neon-red'}">{p.status === 'ok' ? '✓' : '✗'}</span>
-                <span class="text-hud-dim">{p.name === 'ssh' ? 'ssh:' + (vm.port_ssh || 22) : p.name}</span>
-                {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
-              </div>
-            {/each}
-          </div>
-          <div class="text-[11px] text-hud-dim">{$t('vd.batteryHint')}</div>
-          {#if !battery.probes.length}<div class="hud-label text-hud-dim">{$t('vd.noProbes')}</div>{/if}
+    <!-- Liveness // probe: battery (auto snapshot) + manual probe (collapsible) -->
+    <section class="hud-panel p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="hud-label text-neon-cyan">{$t('vd.statusBattery')}</span>
+        {#if !battery.busy && battery.probes.length}
+          <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? $t('vd.up') : $t('vd.down')} · <span class="normal-case">{livenessEvidence}</span></span>
         {/if}
-      </section>
+        <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
+      </div>
+      {#if battery.busy}
+        <div class="hud-label text-hud-dim animate-pulse">{$t('vd.probingBattery')}</div>
+      {:else if battery.err}
+        <div class="text-xs font-mono text-neon-red">{battery.err}</div>
+      {:else}
+        <div class="flex flex-wrap gap-1.5">
+          {#each battery.probes as p}
+            <div class="flex items-center gap-1 border border-hud-line rounded px-1.5 py-0.5 text-xs font-mono" title={probeHint(p.name)}>
+              <span class="{p.status === 'ok' ? 'text-neon-green' : 'text-neon-red'}">{p.status === 'ok' ? '✓' : '✗'}</span>
+              <span class="text-hud-dim">{p.name === 'ssh' ? 'ssh:' + (vm.port_ssh || 22) : p.name}</span>
+              {#if p.status === 'ok'}<span class="text-hud-dim">{Number(p.latency_ms).toFixed(0)}ms</span>{/if}
+            </div>
+          {/each}
+        </div>
+        <div class="text-[11px] text-hud-dim">{$t('vd.batteryHint')}</div>
+        {#if !battery.probes.length}<div class="hud-label text-hud-dim">{$t('vd.noProbes')}</div>{/if}
+      {/if}
 
-      <section class="hud-panel p-3 space-y-2">
-        <div class="hud-label text-neon-cyan">{$t('vd.toolsProbe')}</div>
-        <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
+      <!-- Manual probe: a single checker (tcp/http/tls/whois) with a custom port/url, on demand -->
+      <details class="border-t border-hud-line pt-2 mt-1">
+        <summary class="hud-label text-hud-dim cursor-pointer select-none">{$t('vd.toolsProbe')}</summary>
+        <div class="grid grid-cols-[auto_1fr_auto] gap-2 items-center mt-2">
           <select class="hud-input" bind:value={diag.check_type}>
             {#each DIAG_TYPES as dt}<option value={dt}>{dt}</option>{/each}
           </select>
@@ -644,14 +643,14 @@
         </div>
         {#if diag.msg}<div class="text-xs font-mono text-neon-red">{diag.msg}</div>{/if}
         {#if diag.res}
-          <div class="border border-hud-line rounded px-2 py-1 text-xs font-mono flex items-center gap-2">
+          <div class="border border-hud-line rounded px-2 py-1 text-xs font-mono flex items-center gap-2 mt-2">
             <span class="hud-label {diag.res.status === 'ok' ? 'text-neon-green' : diag.res.status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{diag.res.status}</span>
             <span class="text-hud-dim">{Number(diag.res.latency_ms || 0).toFixed(1)}ms</span>
-            <span class="text-emerald-200/70 truncate">{diag.res.message}</span>
+            <span class="text-emerald-200/70 min-w-0 break-words">{diag.res.message}</span>
           </div>
         {/if}
-      </section>
-    </div>
+      </details>
+    </section>
 
     <!-- IP info (GeoIP + ASN + PTR) — Plane A, keyless -->
     {#if vm.ip}
