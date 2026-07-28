@@ -98,7 +98,7 @@
         <span class="font-mono text-emerald-200 ml-1">{domains.find((d) => d.id === selected)?.name}</span>
       </div>
       {#if infoBusy}
-        <div class="hud-label text-hud-dim animate-pulse">{$t('dom.probing')}</div>
+        <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('dom.probing')}</div>
       {:else if info?.error}
         <div class="text-xs font-mono text-neon-red">{info.error}</div>
       {:else if info}

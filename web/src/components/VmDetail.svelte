@@ -558,7 +558,7 @@
 
 <div class="h-full overflow-auto p-3 space-y-2">
   {#if loading}
-    <div class="hud-label animate-pulse">{$t('g.loading')}</div>
+    <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('g.loading')}</div>
   {:else if !vm}
     <div class="hud-panel p-6 text-center">
       {#if err}<div class="hud-label text-neon-red mb-1">load error</div><p class="text-xs text-neon-red font-mono">{err}</p>{:else}<div class="hud-label mb-1">no vm selected</div><p class="text-xs text-hud-dim">{$t('list.empty')}</p>{/if}
@@ -651,7 +651,7 @@
         <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
       </div>
       {#if battery.busy}
-        <div class="hud-label text-hud-dim animate-pulse">{$t('vd.probingBattery')}</div>
+        <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('vd.probingBattery')}</div>
       {:else if battery.err}
         <div class="text-xs font-mono text-neon-red">{battery.err}</div>
       {:else}
@@ -698,7 +698,7 @@
           <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadIPInfo(vmId)} disabled={ipinfo.busy}>{ipinfo.busy ? '…' : '↻'}</button>
         </div>
         {#if ipinfo.busy}
-          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.resolvingGeo')}</div>
+          <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('vd.resolvingGeo')}</div>
         {:else if ipinfo.err}
           <div class="text-xs font-mono text-neon-red">{ipinfo.err}</div>
         {:else if ipinfo.data}
@@ -724,7 +724,7 @@
           <button class="hud-btn !py-0.5" on:click={() => (deepscan.show = true)} disabled={deepscan.busy} title={$t('vd.deepHint')}>⌖ {$t('vd.deepScan')}</button>
         </div>
         {#if portscan.busy}
-          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.scanningPorts')}</div>
+          <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('vd.scanningPorts')}</div>
         {:else if portscan.err}
           <div class="text-xs font-mono text-neon-red">{portscan.err}</div>
         {:else}
@@ -742,7 +742,7 @@
 
         <!-- Deep scan results (wide-range TCP; finds ports the standard 25 miss) -->
         {#if deepscan.busy}
-          <div class="border-t border-hud-line pt-1.5 hud-label text-neon-amber animate-pulse">⌖ {$t('vd.deepRunning', { scope: deepscan.scope })}</div>
+          <div class="border-t border-hud-line pt-1.5 hud-label text-neon-amber"><span class="hud-spinner"></span> ⌖ {$t('vd.deepRunning', { scope: deepscan.scope })}</div>
         {:else if deepscan.err}
           <div class="border-t border-hud-line pt-1.5 text-xs font-mono text-neon-red">⌖ {deepscan.err}</div>
         {:else if deepscan.open.length}
@@ -797,7 +797,7 @@
           <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={() => loadExposures(vmId)} disabled={exposures.busy}>{exposures.busy ? '…' : $t('g.scan')}</button>
         </div>
         {#if exposures.busy}
-          <div class="hud-label text-hud-dim animate-pulse">{$t('vd.exposuresScanning')}</div>
+          <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('vd.exposuresScanning')}</div>
         {:else if exposures.err}
           <div class="text-xs font-mono text-neon-red">{exposures.err}</div>
         {:else if exposures.findings.length}
@@ -874,7 +874,7 @@
           <details class="text-xs font-mono" on:open={loadPackages}>
             <summary class="hud-label text-hud-dim cursor-pointer">{$t('vd.packagesN', { n: system.packages })}</summary>
             {#if packagesList === null}
-              <div class="hud-label text-hud-dim mt-1 animate-pulse">{$t('g.loading')}</div>
+              <div class="hud-label text-neon-cyan mt-1"><span class="hud-spinner"></span> {$t('g.loading')}</div>
             {:else if packagesList.length}
               <div class="flex flex-wrap gap-1 mt-1 max-h-32 overflow-auto">{#each packagesList as p}<span class="text-emerald-200/60 border border-hud-line rounded px-1">{p}</span>{/each}</div>
             {:else}

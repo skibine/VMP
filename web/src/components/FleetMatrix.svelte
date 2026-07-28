@@ -103,7 +103,7 @@
   {#if err}
     <div class="text-xs text-neon-red font-mono">{err}</div>
   {:else if loading}
-    <div class="hud-label animate-pulse">{$t('mx.scanning')}</div>
+    <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('mx.scanning')}</div>
   {:else if !vms.length}
     <div class="hud-panel p-6 text-center">
       <div class="hud-label mb-1">{$t('mx.empty')}</div>

@@ -105,7 +105,7 @@
 
   <div class="flex-1 overflow-auto">
     {#if loading}
-      <div class="px-3 py-2 hud-label animate-pulse">{$t('list.scanning')}</div>
+      <div class="px-3 py-2 hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('list.scanning')}</div>
     {:else if error}
       <div class="px-3 py-2 text-xs text-neon-red font-mono">{error}</div>
     {:else}

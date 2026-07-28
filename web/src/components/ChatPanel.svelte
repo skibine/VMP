@@ -207,7 +207,7 @@
       </div>
     {/each}
     {#if busy}
-      <div class="hud-label animate-pulse">{$t('chat.thinking')}</div>
+      <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('chat.thinking')}</div>
     {/if}
     {#if pending.length}
       <div class="space-y-2 pt-2">

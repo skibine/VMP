@@ -103,4 +103,21 @@ body {
       transform: translateY(100%);
     }
   }
+  /* A visible "working" indicator: a rotating ring (currentColor), far more noticeable than a
+     faint animate-pulse on dim text. Used in every loading/busy state so a newcomer sees activity. */
+  .hud-spinner {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: hud-spin 0.7s linear infinite;
+    vertical-align: -1px;
+  }
+  @keyframes hud-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 }
