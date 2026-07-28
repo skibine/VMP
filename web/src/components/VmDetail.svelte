@@ -291,6 +291,7 @@
   // stays "up" even if a monitored service (e.g. ssh:22) is critical.
   $: headerVerdict = battery.busy ? '…' : (livenessUp ? 'up' : (battery.probes.length ? 'down' : '…'))
   $: headerColor = headerVerdict === 'up' ? 'neon-green' : headerVerdict === 'down' ? 'neon-red' : 'hud-dim'
+  $: lampClass = headerVerdict === 'up' ? 'bg-neon-green' : headerVerdict === 'down' ? 'bg-neon-red' : 'bg-hud-dim'
   $: healthReason = (() => {
     if (!health || health.status === 'ok') return ''
     const rank = { critical: 3, warn: 2, unknown: 1 }
@@ -528,18 +529,24 @@
       {#if err}<div class="hud-label text-neon-red mb-1">load error</div><p class="text-xs text-neon-red font-mono">{err}</p>{:else}<div class="hud-label mb-1">no vm selected</div><p class="text-xs text-hud-dim">{$t('list.empty')}</p>{/if}
     </div>
   {:else}
-    <!-- Header: name + health in words -->
-    <div class="hud-panel p-4">
+    <!-- Header: dense single-block — status lamp + name + address + verdict + badges -->
+    <div class="hud-panel p-3 space-y-2">
       <div class="flex items-center gap-2">
-        <h2 class="font-mono text-neon-green text-lg truncate">{vm.name}</h2>
-        <span class="hud-label text-{headerColor} ml-auto uppercase">{headerVerdict === 'up' ? $t('vd.up') : headerVerdict === 'down' ? $t('vd.down') : headerVerdict}</span>
+        <span class="inline-block w-2 h-2 rounded-full shrink-0 {lampClass}" title={headerVerdict}></span>
+        <h2 class="font-mono text-neon-green text-base truncate">{vm.name}</h2>
+        <span class="text-xs text-hud-dim font-mono shrink-0">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</span>
+        <span class="hud-label text-{headerColor} uppercase shrink-0 ml-auto">{headerVerdict === 'up' ? $t('vd.up') : headerVerdict === 'down' ? $t('vd.down') : headerVerdict}</span>
+        <button class="hud-btn !py-0.5 !px-2 !text-xs shrink-0" on:click={() => (editMode = !editMode)} title={$t('vd.edit')}>{editMode ? $t('g.close') : $t('vd.edit')}</button>
       </div>
-      <div class="text-xs text-hud-dim font-mono mt-1">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</div>
-      {#if !livenessUp && !battery.busy && battery.probes.length}<div class="text-[11px] font-mono text-neon-red mt-0.5">{$t('vd.unreachable')}</div>{/if}
-      {#if livenessUp && healthReason}<div class="text-[11px] font-mono text-neon-amber mt-0.5">{$t('vd.serviceUp', { reason: healthReason })}</div>{/if}
-      {#if vm.tags?.length}<div class="flex flex-wrap gap-1 mt-2">{#each vm.tags as tag}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{tag}</span>{/each}<span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span></div>{:else}<div class="mt-2"><span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}">{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span></div>{/if}
-      <div class="flex items-center gap-2 mt-3">
-        <button class="hud-btn" on:click={() => (editMode = !editMode)}>{editMode ? $t('g.close') : $t('vd.edit')}</button>
+      {#if !livenessUp && !battery.busy && battery.probes.length}
+        <div class="text-[11px] font-mono text-neon-red">{$t('vd.unreachable')}</div>
+      {:else if livenessUp && healthReason}
+        <div class="text-[11px] font-mono text-neon-amber">{$t('vd.serviceUp', { reason: healthReason })}</div>
+      {/if}
+      <div class="flex flex-wrap gap-1 items-center">
+        {#each vm.tags as tag}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{tag}</span>{/each}
+        <span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}" title={$t('vd.aiAccessHint')}>{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span>
+        <span class="hud-label border rounded px-1.5 py-0.5 {cred.has_secret ? 'text-neon-green border-neon-green/30' : 'text-hud-dim border-hud-line'}" title={$t('vd.sshCreds')}>{cred.has_secret ? $t('vd.credsSet') : $t('vd.credsNone')}</span>
       </div>
     </div>
 
