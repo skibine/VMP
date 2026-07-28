@@ -214,7 +214,13 @@ func (a *crudAPI) errorsVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close()
-	el, err := a.dialer.RecentErrors(r.Context(), client, window)
+	// Fetch the stored sudo password (if any) so a non-root SSH user with password-sudo can still
+	// read the system journal via `sudo -S` (otherwise journalctl is denied and we'd see a false 0).
+	var sudoPassword string
+	if creds, ok, _ := a.st.GetVMCredentials(r.Context(), id); ok {
+		sudoPassword = creds.SudoPassword
+	}
+	el, err := a.dialer.RecentErrors(r.Context(), client, window, sudoPassword)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"error": "other", "detail": err.Error()})
 		return

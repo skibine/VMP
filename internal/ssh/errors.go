@@ -56,46 +56,66 @@ var journalSince = map[string]string{
 // has zero errors.
 // @complexity 6
 // endregion FUNC_Dialer_RecentErrors
-func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window string) (ErrorLog, error) {
+func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window, sudoPassword string) (ErrorLog, error) {
 	since, ok := journalSince[window]
 	if !ok {
 		since, window = journalSince["24h"], "24h"
 	}
 	// NOTE: no `2>/dev/null` — we must SEE permission failures to report them honestly.
-	cmd := fmt.Sprintf(`journalctl -p err --since %q -n 100 --no-pager -o short-iso`, since)
+	base := fmt.Sprintf(`journalctl -p err --since %q -n 100 --no-pager -o short-iso`, since)
 
-	out, _ := d.runCaptured(ctx, client, cmd)
+	// When the VM has a stored sudo password, use it authoritatively (sudo -S + password on stdin)
+	// so a non-root SSH user with password-sudo can still read the system journal.
+	if sudoPassword != "" {
+		out, _ := d.runCaptured(ctx, client, "sudo -S -p '' "+base, sudoPassword+"\n")
+		el := parseErrors(out)
+		if el.Count > 0 {
+			el.Window = window
+			return el, nil
+		}
+		if isPermDenied(out) {
+			return ErrorLog{}, fmt.Errorf("no journal access — the sudo password is wrong or sudo is unavailable on the VM")
+		}
+		el.Window = window
+		return el, nil
+	}
+
+	// No stored password: try plain journalctl, fall back to passwordless sudo (sudo -n).
+	out, _ := d.runCaptured(ctx, client, base, "")
 	el := parseErrors(out)
 	if el.Count > 0 {
 		el.Window = window
 		return el, nil
 	}
-	// No parseable entries. If the cause is access denial (not a genuinely clean box), try sudo -n.
 	if isPermDenied(out) {
-		out2, _ := d.runCaptured(ctx, client, "sudo -n "+cmd)
+		out2, _ := d.runCaptured(ctx, client, "sudo -n "+base, "")
 		el2 := parseErrors(out2)
 		if el2.Count > 0 {
 			el2.Window = window
 			return el2, nil
 		}
 		if isPermDenied(out2) {
-			return ErrorLog{}, fmt.Errorf("no journal access — the SSH user needs sudo (NOPASSWD) or membership in the systemd-journal group")
+			return ErrorLog{}, fmt.Errorf("no journal access — set the VM's sudo password, or grant the SSH user sudo / systemd-journal group")
 		}
 		el2.Window = window
 		return el2, nil
 	}
-	// Plain journalctl ran fine, zero entries -> genuinely clean.
+	// Plain journalctl ran fine with zero entries -> genuinely clean.
 	el.Window = window
 	return el, nil
 }
 
 // runCaptured runs a remote command with combined output and a ctx-abort (best-effort SIGKILL).
-func (d *Dialer) runCaptured(ctx context.Context, client *gossh.Client, cmd string) (string, error) {
+// stdin (when non-empty) is fed to the command — used to pass the sudo password for `sudo -S`.
+func (d *Dialer) runCaptured(ctx context.Context, client *gossh.Client, cmd, stdin string) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("new session: %w", err)
 	}
 	defer sess.Close()
+	if stdin != "" {
+		sess.Stdin = strings.NewReader(stdin)
+	}
 	type result struct {
 		out []byte
 		err error
