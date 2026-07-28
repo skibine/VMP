@@ -521,7 +521,7 @@
   $: needsParam = diag.check_type === 'tcp' || diag.check_type === 'tls' || diag.check_type === 'http'
 </script>
 
-<div class="h-full overflow-auto p-4 space-y-4">
+<div class="h-full overflow-auto p-3 space-y-2">
   {#if loading}
     <div class="hud-label animate-pulse">{$t('g.loading')}</div>
   {:else if !vm}
@@ -530,7 +530,7 @@
     </div>
   {:else}
     <!-- Header: dense single-block — status lamp + name + address + verdict + badges -->
-    <div class="hud-panel p-3 space-y-2">
+    <div class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {lampClass}" title={headerVerdict}></span>
         <h2 class="font-mono text-neon-green text-base truncate">{vm.name}</h2>
@@ -605,7 +605,7 @@
     </div>
 
     <!-- Liveness // probe: battery (auto snapshot) + manual probe (collapsible) -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">{$t('vd.statusBattery')}</span>
         {#if !battery.busy && battery.probes.length}
@@ -654,7 +654,7 @@
 
     <!-- IP info (GeoIP + ASN + PTR) — Plane A, keyless -->
     {#if vm.ip}
-      <section class="hud-panel p-3 space-y-2">
+      <section class="hud-panel p-2.5 space-y-1.5">
         <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">{$t('vd.ipInfo')}</span>
           <span class="text-xs text-hud-dim font-mono truncate ml-1">{vm.ip}</span>
@@ -678,7 +678,7 @@
     {/if}
 
     <!-- Ports // exposed (external scan, Plane A, no creds) -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">{$t('vd.portsExposed')}</span>
           <span class="text-xs text-hud-dim font-mono ml-1">{$t('vd.portsCount', { open: portscan.ports.filter((p) => p.open).length, scanned: portscan.ports.length })}</span>
@@ -704,7 +704,7 @@
 
     <!-- Security // exposures (curated exposure scan, Plane A, no creds) -->
     {#if vm.ip}
-      <section class="hud-panel p-3 space-y-2">
+      <section class="hud-panel p-2.5 space-y-1.5">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="hud-label text-neon-cyan">{$t('vd.exposures')}</span>
           {#if !exposures.busy && exposures.findings.length}
@@ -744,7 +744,7 @@
 
     <!-- System profile (inventory from cred-save probe) -->
     {#if system}
-      <section class="hud-panel p-3 space-y-2">
+      <section class="hud-panel p-2.5 space-y-1.5">
         <div class="flex items-center gap-2">
           <div class="hud-label text-neon-cyan">{$t('vd.systemProfile')}</div>
           <button class="hud-btn !py-0.5 ml-auto" on:click={refreshProfile} disabled={profileBusy}>{profileBusy ? '…' : $t('g.refresh')}</button>
@@ -802,7 +802,7 @@
     {/if}
 
     <!-- Logs // errors (journalctl priority=err, Plane B over SSH) -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">{$t('vd.logsErrors')}</span>
         {#each ['1h', '24h', '7d'] as r}
@@ -830,7 +830,7 @@
 
     <!-- Updates // available (apt simulate, Plane B over SSH) -->
     {#if cred.has_secret}
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">{$t('vd.updatesAvail')}</span>
         <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadUpdates} disabled={updates.busy}>{updates.busy ? '…' : $t('g.check')}</button>
@@ -861,7 +861,7 @@
 
     <!-- Sites // vhosts (nginx/apache config, Plane B over SSH) — only when SSH creds exist -->
     {#if cred.has_secret}
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">{$t('vd.sitesVhosts')}</span>
         <button class="hud-btn hud-btn-primary !py-0.5 ml-auto" on:click={loadVHosts} disabled={vhosts.busy}>{vhosts.busy ? '…' : $t('g.scan')}</button>
@@ -885,7 +885,7 @@
 
     <!-- Site info (HTTP headers + security + CMS, Plane A keyless) — only when a web port answers -->
     {#if vm.ip && (battery.busy || batteryWebOk)}
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="hud-label text-neon-cyan">{$t('vd.siteInfo')}</span>
         <input class="hud-input text-xs flex-1 min-w-0" bind:value={siteinfo.url} placeholder="http://host/" />
@@ -913,7 +913,7 @@
     {/if}
 
     <!-- Metrics history (pull-poller) — charts stacked 2x2 -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">{$t('vd.metricsHistory')}</span>
         <span class="hud-label text-hud-dim ml-auto">{$t('vd.sshPull')}</span>
@@ -944,7 +944,7 @@
     </section>
 
     <!-- Live (interactive terminal) + one-shot snapshot (only when metrics history is off) -->
-    <section class="hud-panel p-3 space-y-2">
+    <section class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="hud-label text-neon-cyan">{$t('vd.liveTerminal')}</span>
         {#if !vm.metrics_enabled}
