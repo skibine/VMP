@@ -26,6 +26,8 @@ import (
 	"strings"
 
 	gossh "golang.org/x/crypto/ssh"
+
+	"github.com/skibine/vm-pulse/internal/logging"
 )
 
 // ErrorEntry is one parsed error log line.
@@ -61,48 +63,70 @@ func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window,
 	if !ok {
 		since, window = journalSince["24h"], "24h"
 	}
+	logging.LDD(d.logger, 7, "RecentErrors", "START", fmt.Sprintf("window=%s sudo_set=%t", window, sudoPassword != ""))
 	// NOTE: no `2>/dev/null` — we must SEE permission failures to report them honestly.
 	base := fmt.Sprintf(`journalctl -p err --since %q -n 100 --no-pager -o short-iso`, since)
 
 	// When the VM has a stored sudo password, use it authoritatively (sudo -S + password on stdin)
 	// so a non-root SSH user with password-sudo can still read the system journal.
 	if sudoPassword != "" {
-		out, _ := d.runCaptured(ctx, client, "sudo -S -p '' "+base, sudoPassword+"\n")
+		out, runErr := d.runCaptured(ctx, client, "sudo -S -p '' "+base, sudoPassword+"\n")
+		logging.LDD(d.logger, 8, "RecentErrors", "RAW_SUDO_S", fmt.Sprintf("len=%d out=%q err=%v", len(out), snippet(out), runErr))
 		el := parseErrors(out)
 		if el.Count > 0 {
+			logging.LDD(d.logger, 8, "RecentErrors", "RESULT", fmt.Sprintf("count=%d (via sudo -S)", el.Count))
 			el.Window = window
 			return el, nil
 		}
 		if isPermDenied(out) {
+			logging.LDD(d.logger, 9, "RecentErrors", "NO_ACCESS", "sudo -S denied: "+snippet(out))
 			return ErrorLog{}, fmt.Errorf("no journal access — the sudo password is wrong or sudo is unavailable on the VM")
 		}
+		logging.LDD(d.logger, 8, "RecentErrors", "RESULT", "count=0 (sudo -S ok, genuinely clean)")
 		el.Window = window
 		return el, nil
 	}
 
 	// No stored password: try plain journalctl, fall back to passwordless sudo (sudo -n).
-	out, _ := d.runCaptured(ctx, client, base, "")
+	out, runErr := d.runCaptured(ctx, client, base, "")
+	logging.LDD(d.logger, 8, "RecentErrors", "RAW_PLAIN", fmt.Sprintf("len=%d out=%q err=%v", len(out), snippet(out), runErr))
 	el := parseErrors(out)
 	if el.Count > 0 {
+		logging.LDD(d.logger, 8, "RecentErrors", "RESULT", fmt.Sprintf("count=%d (plain)", el.Count))
 		el.Window = window
 		return el, nil
 	}
 	if isPermDenied(out) {
-		out2, _ := d.runCaptured(ctx, client, "sudo -n "+base, "")
+		out2, runErr2 := d.runCaptured(ctx, client, "sudo -n "+base, "")
+		logging.LDD(d.logger, 8, "RecentErrors", "RAW_SUDO_N", fmt.Sprintf("len=%d out=%q err=%v", len(out2), snippet(out2), runErr2))
 		el2 := parseErrors(out2)
 		if el2.Count > 0 {
+			logging.LDD(d.logger, 8, "RecentErrors", "RESULT", fmt.Sprintf("count=%d (sudo -n)", el2.Count))
 			el2.Window = window
 			return el2, nil
 		}
 		if isPermDenied(out2) {
+			logging.LDD(d.logger, 9, "RecentErrors", "NO_ACCESS", "plain+sudo -n denied: "+snippet(out2))
 			return ErrorLog{}, fmt.Errorf("no journal access — set the VM's sudo password, or grant the SSH user sudo / systemd-journal group")
 		}
+		logging.LDD(d.logger, 8, "RecentErrors", "RESULT", "count=0 (sudo -n ok, genuinely clean)")
 		el2.Window = window
 		return el2, nil
 	}
 	// Plain journalctl ran fine with zero entries -> genuinely clean.
+	logging.LDD(d.logger, 8, "RecentErrors", "RESULT", "count=0 (plain ok, genuinely clean)")
 	el.Window = window
 	return el, nil
+}
+
+// snippet returns a single-line, length-bounded preview of raw command output for diagnostics.
+func snippet(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ⏎ ")
+	s = strings.TrimSpace(s)
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	return s
 }
 
 // runCaptured runs a remote command with combined output and a ctx-abort (best-effort SIGKILL).
