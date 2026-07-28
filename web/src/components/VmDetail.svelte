@@ -79,6 +79,14 @@
     prevVmId = vmId
     showTerm = false
     termKey++
+    // Reset the manually-triggered / one-shot per-VM states so the previous VM's results don't
+    // leak into the newly-selected one (deep-scan ports, exposures findings, diag result, errors,
+    // updates — none of these auto-reload on vmId change, so they'd persist until a re-run).
+    deepscan = { open: [], busy: false, err: '', scope: 'fast', show: false, scanned: 0 }
+    exposures = { findings: [], busy: false, err: '' }
+    diag = { check_type: 'tcp', param: '', busy: false, msg: '', res: null }
+    errors = { data: null, busy: false, err: '', kind: '', range: '24h' }
+    updates = { data: null, busy: false, err: '', kind: '' }
   }
 
   // Metrics history (pull-poller) + sparklines.
@@ -135,12 +143,14 @@
 
   async function runDeepScan() {
     const scope = deepscan.scope
+    const id = vmId // capture at start: the scan outlives a possible VM switch
     deepscan = { ...deepscan, open: [], busy: true, err: '', show: false }
     try {
-      const d = await api.deepScan(vmId, scope)
-      if (vmId !== vmId) return
+      const d = await api.deepScan(id, scope)
+      if (id !== vmId) return // switched away mid-scan -> discard, don't leak onto the new VM
       deepscan = { open: d.open || [], busy: false, err: '', scope, show: false, scanned: scope === 'full' ? 65535 : 0 }
     } catch (e) {
+      if (id !== vmId) return
       deepscan = { ...deepscan, open: [], busy: false, err: e.message, show: false }
     }
   }
@@ -185,29 +195,35 @@
   }
 
   async function loadErrors() {
+    const id = vmId // capture: a VM switch mid-request must not land the result on the new VM
     errors = { data: null, busy: true, err: '', kind: '', range: errors.range }
     try {
-      const d = await api.vmErrors(vmId, errors.range)
+      const d = await api.vmErrors(id, errors.range)
+      if (id !== vmId) return
       if (d.error) {
         errors = { data: null, busy: false, err: d.detail || d.error, kind: d.error, range: errors.range }
       } else {
         errors = { data: d, busy: false, err: '', kind: '', range: errors.range }
       }
     } catch (e) {
+      if (id !== vmId) return
       errors = { data: null, busy: false, err: e.message, kind: '', range: errors.range }
     }
   }
 
   async function loadUpdates() {
+    const id = vmId // capture: a switch mid-request must not leak onto the new VM
     updates = { data: null, busy: true, err: '', kind: '' }
     try {
-      const d = await api.vmUpdates(vmId)
+      const d = await api.vmUpdates(id)
+      if (id !== vmId) return
       if (d.error) {
         updates = { data: null, busy: false, err: d.detail || d.error, kind: d.error }
       } else {
         updates = { data: d, busy: false, err: '', kind: '' }
       }
     } catch (e) {
+      if (id !== vmId) return
       updates = { data: null, busy: false, err: e.message, kind: '' }
     }
   }
@@ -319,6 +335,7 @@
   })()
 
   async function runDiag() {
+    const id = vmId // capture: a switch mid-probe must not leak the result onto the new VM
     diag.busy = true
     diag.msg = ''
     diag.res = null
@@ -326,11 +343,14 @@
     if (diag.check_type === 'tcp' || diag.check_type === 'tls') params.port = Number(diag.param) || 22
     if (diag.check_type === 'http') params.url = diag.param
     try {
-      diag.res = await api.diagnose(vmId, { check_type: diag.check_type, params })
+      const res = await api.diagnose(id, { check_type: diag.check_type, params })
+      if (id !== vmId) return
+      diag.res = res
     } catch (e) {
+      if (id !== vmId) return
       diag.msg = e.message
     } finally {
-      diag.busy = false
+      if (id === vmId) diag.busy = false
     }
   }
 
