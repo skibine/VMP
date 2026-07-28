@@ -667,11 +667,11 @@
           <div class="text-xs font-mono text-neon-red">{ipinfo.err}</div>
         {:else if ipinfo.data}
           <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs font-mono">
-            <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.location')}</span> {ipinfo.data.country || '—'}{ipinfo.data.city ? ' · ' + ipinfo.data.city : ''}{ipinfo.data.country_code ? ' (' + ipinfo.data.country_code + ')' : ''}</div>
-            <div class="truncate"><span class="hud-label text-hud-dim">asn</span> {ipinfo.data.asn || '—'}</div>
-            <div class="truncate"><span class="hud-label text-hud-dim">{$t('vd.isp')}</span> {ipinfo.data.isp || ipinfo.data.org || '—'}</div>
-            <div class="truncate"><span class="hud-label text-hud-dim">tz</span> {ipinfo.data.timezone || '—'}</div>
-            <div class="col-span-2 md:col-span-4 truncate"><span class="hud-label text-hud-dim">ptr</span> {ipinfo.data.ptr || '—'}</div>
+            <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">{$t('vd.location')}</span> {ipinfo.data.country || '—'}{ipinfo.data.city ? ' · ' + ipinfo.data.city : ''}{ipinfo.data.country_code ? ' (' + ipinfo.data.country_code + ')' : ''}</div>
+            <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">asn</span> {ipinfo.data.asn || '—'}</div>
+            <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">{$t('vd.isp')}</span> {ipinfo.data.isp || ipinfo.data.org || '—'}</div>
+            <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">tz</span> {ipinfo.data.timezone || '—'}</div>
+            <div class="col-span-2 md:col-span-4 break-words"><span class="hud-label text-hud-dim">ptr</span> {ipinfo.data.ptr || '—'}</div>
           </div>
           {#if ipinfo.data.geo_error}<div class="text-[11px] font-mono text-neon-amber">geo: {ipinfo.data.geo_error}</div>{/if}
         {/if}
