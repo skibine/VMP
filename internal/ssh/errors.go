@@ -9,11 +9,14 @@
 // @invariants
 //   - The command is built ONLY from a fixed window allowlist (1h/24h/7d) — no user input reaches
 //     the shell, so there is no RCE surface.
-//   - journalctl may be unavailable or restricted (non-root); that yields Count 0, not an error.
+//   - A non-root SSH user without journal access gets an honest "no journal access" error, NOT a
+//     silent zero (the old `2>/dev/null` hid permission failures and reported 0 errors falsely).
+//   - Falls back to `sudo -n journalctl` (passwordless sudo / NOPASSWD) when plain journalctl is
+//     denied — consistent with the vhosts/docker probes.
 //
 // endregion MODULE_CONTRACT
-// GREP_SUMMARY: errors, logs, journalctl, syslog, priority err, recent errors, diagnostics
-// STRUCTURE: ▶ ┌client,window┐ → ◇ allowlist(window) → ⚡ CombinedOutput(journalctl) → ⊕ parse → ⎷ ErrorLog
+// GREP_SUMMARY: errors, logs, journalctl, syslog, priority err, recent errors, sudo, diagnostics
+// STRUCTURE: ▶ ┌client,window┐ → ◇ allowlist(window) → ⚡ journalctl → 〈denied? sudo -n〉 → ⊕ parse → ⎷ ErrorLog
 package ssh
 
 import (
@@ -48,7 +51,9 @@ var journalSince = map[string]string{
 
 // region FUNC_Dialer_RecentErrors [DOMAIN(8): Observability; CONCEPT(7): LogErrors; TECH(8): ssh]
 // @purpose Run a fixed journalctl priority=err probe over an open client and parse recent errors.
-// The remote command is bounded (-n 100) AND the request context can abort it mid-flight.
+// Honests about access: if the SSH user cannot read the journal, returns an error instead of a
+// silent zero — so the operator knows to grant sudo / systemd-journal, rather than believe the box
+// has zero errors.
 // @complexity 6
 // endregion FUNC_Dialer_RecentErrors
 func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window string) (ErrorLog, error) {
@@ -56,17 +61,41 @@ func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window 
 	if !ok {
 		since, window = journalSince["24h"], "24h"
 	}
-	// Fixed command; the only interpolated value comes from the allowlist above. -n bounds the
-	// volume server-side so journalctl never streams an unbounded history before truncation.
-	cmd := fmt.Sprintf(
-		`journalctl -p err --since %q -n 100 --no-pager -o short-iso 2>/dev/null`, since)
+	// NOTE: no `2>/dev/null` — we must SEE permission failures to report them honestly.
+	cmd := fmt.Sprintf(`journalctl -p err --since %q -n 100 --no-pager -o short-iso`, since)
+
+	out, _ := d.runCaptured(ctx, client, cmd)
+	el := parseErrors(out)
+	if el.Count > 0 {
+		el.Window = window
+		return el, nil
+	}
+	// No parseable entries. If the cause is access denial (not a genuinely clean box), try sudo -n.
+	if isPermDenied(out) {
+		out2, _ := d.runCaptured(ctx, client, "sudo -n "+cmd)
+		el2 := parseErrors(out2)
+		if el2.Count > 0 {
+			el2.Window = window
+			return el2, nil
+		}
+		if isPermDenied(out2) {
+			return ErrorLog{}, fmt.Errorf("no journal access — the SSH user needs sudo (NOPASSWD) or membership in the systemd-journal group")
+		}
+		el2.Window = window
+		return el2, nil
+	}
+	// Plain journalctl ran fine, zero entries -> genuinely clean.
+	el.Window = window
+	return el, nil
+}
+
+// runCaptured runs a remote command with combined output and a ctx-abort (best-effort SIGKILL).
+func (d *Dialer) runCaptured(ctx context.Context, client *gossh.Client, cmd string) (string, error) {
 	sess, err := client.NewSession()
 	if err != nil {
-		return ErrorLog{}, fmt.Errorf("recent-errors: new session: %w", err)
+		return "", fmt.Errorf("new session: %w", err)
 	}
 	defer sess.Close()
-
-	// CombinedOutput blocks until the remote command exits; run it in a goroutine so ctx can abort.
 	type result struct {
 		out []byte
 		err error
@@ -78,15 +107,29 @@ func (d *Dialer) RecentErrors(ctx context.Context, client *gossh.Client, window 
 	}()
 	select {
 	case r := <-done:
-		// journalctl may exit non-zero when there are no matching entries; treat as empty.
-		_ = r.err
-		el := parseErrors(string(r.out))
-		el.Window = window
-		return el, nil
+		return string(r.out), r.err
 	case <-ctx.Done():
-		_ = sess.Signal(gossh.SIGKILL) // best-effort abort of the remote command
-		return ErrorLog{Window: window, Count: 0, Entries: []ErrorEntry{}}, ctx.Err()
+		_ = sess.Signal(gossh.SIGKILL)
+		return "", ctx.Err()
 	}
+}
+
+// permSignals are substrings journalctl/shell emit when the user lacks journal access. Matching any
+// means "could not read", which we must NOT confuse with "no errors".
+var permSignals = []string{
+	"permission denied", "access denied", "not permitted", "operation not permitted",
+	"failed to query journal", "failed to get journal", "no journal files",
+	"insufficient", "not allowed",
+}
+
+func isPermDenied(s string) bool {
+	low := strings.ToLower(s)
+	for _, sig := range permSignals {
+		if strings.Contains(low, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // reErrLine matches "<iso-ts> <host> <unit>[pid]: <message>" with the [pid] optional, so kernel
@@ -98,7 +141,7 @@ func parseErrors(out string) ErrorLog {
 	el := ErrorLog{Entries: []ErrorEntry{}}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "-- No entries") {
+		if line == "" || strings.HasPrefix(line, "-- No entries") || strings.HasPrefix(line, "-- Journal begins") {
 			continue
 		}
 		if m := reErrLine.FindStringSubmatch(line); len(m) == 4 {
