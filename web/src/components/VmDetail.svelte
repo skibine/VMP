@@ -37,6 +37,9 @@
 
   // External port scan (common ports) — Plane A, no creds. Auto-runs on select.
   let portscan = { ports: [], busy: false, err: '' }
+  // Deep (wide-range) TCP scan: finds non-standard open ports the fixed common-port scan misses.
+  // On-demand (button) + modal with a ban/duration warning — NOT auto-run (slow, noisy to IDS).
+  let deepscan = { open: [], busy: false, err: '', scope: 'fast', show: false, scanned: 0 }
   let exposures = { findings: [], busy: false, err: '' }
 
   // IP info (GeoIP + ASN + PTR) — Plane A, keyless, auto-loads when the VM has a public IP.
@@ -127,6 +130,18 @@
     } catch (e) {
       if (id !== vmId) return
       portscan = { ports: [], busy: false, err: e.message }
+    }
+  }
+
+  async function runDeepScan() {
+    const scope = deepscan.scope
+    deepscan = { ...deepscan, open: [], busy: true, err: '', show: false }
+    try {
+      const d = await api.deepScan(vmId, scope)
+      if (vmId !== vmId) return
+      deepscan = { open: d.open || [], busy: false, err: '', scope, show: false, scanned: scope === 'full' ? 65535 : 0 }
+    } catch (e) {
+      deepscan = { ...deepscan, open: [], busy: false, err: e.message, show: false }
     }
   }
 
@@ -685,7 +700,8 @@
       <div class="flex items-center gap-2">
           <span class="hud-label text-neon-cyan">{$t('vd.portsExposed')}</span>
           <span class="text-xs text-hud-dim font-mono ml-1">{$t('vd.portsCount', { open: portscan.ports.filter((p) => p.open).length, scanned: portscan.ports.length })}</span>
-          <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadPortScan(vmId)} disabled={portscan.busy}>{portscan.busy ? '…' : '↻'}</button>
+          <button class="hud-btn !py-0.5 ml-auto" on:click={() => loadPortScan(vmId)} disabled={portscan.busy} title={$t('vd.refreshStd')}>{portscan.busy ? '…' : '↻'}</button>
+          <button class="hud-btn !py-0.5" on:click={() => (deepscan.show = true)} disabled={deepscan.busy} title={$t('vd.deepHint')}>⌖ {$t('vd.deepScan')}</button>
         </div>
         {#if portscan.busy}
           <div class="hud-label text-hud-dim animate-pulse">{$t('vd.scanningPorts')}</div>
@@ -703,7 +719,52 @@
           </div>
           <div class="text-[11px] text-hud-dim">{$t('vd.portsHint')}</div>
         {/if}
+
+        <!-- Deep scan results (wide-range TCP; finds ports the standard 25 miss) -->
+        {#if deepscan.busy}
+          <div class="border-t border-hud-line pt-1.5 hud-label text-neon-amber animate-pulse">⌖ {$t('vd.deepRunning', { scope: deepscan.scope })}</div>
+        {:else if deepscan.err}
+          <div class="border-t border-hud-line pt-1.5 text-xs font-mono text-neon-red">⌖ {deepscan.err}</div>
+        {:else if deepscan.open.length}
+          <div class="border-t border-hud-line pt-1.5 space-y-1">
+            <div class="hud-label text-neon-amber">⌖ {$t('vd.deepResult', { open: deepscan.open.length, scope: deepscan.scope })}</div>
+            <div class="flex flex-wrap gap-1.5">
+              {#each deepscan.open as p}
+                <div class="flex items-center gap-1 border border-neon-green/40 bg-neon-green/5 rounded px-1.5 py-0.5 text-xs font-mono" title={p.service || $t('vd.unknownSvc')}>
+                  <span class="text-neon-green">●</span>
+                  <span class="text-emerald-100">{p.port}</span>
+                  <span class="text-hud-dim">{p.service}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
     </section>
+
+    <!-- Deep-scan modal: scope choice + ban/duration warning -->
+    {#if deepscan.show}
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" on:click|self={() => (deepscan.show = false)}>
+        <div class="hud-panel p-4 space-y-3 max-w-sm w-full">
+          <div class="hud-label text-neon-cyan">⌖ {$t('vd.deepTitle')}</div>
+          <p class="text-xs text-hud-dim">{$t('vd.deepDesc')}</p>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="radio" class="accent-neon-cyan" name="dscope" value="fast" checked={deepscan.scope === 'fast'} on:change={() => (deepscan.scope = 'fast')} />
+              <span class="text-xs"><span class="text-emerald-100">{$t('vd.deepFast')}</span> — {$t('vd.deepFastHint')}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="radio" class="accent-neon-cyan" name="dscope" value="full" checked={deepscan.scope === 'full'} on:change={() => (deepscan.scope = 'full')} />
+              <span class="text-xs"><span class="text-emerald-100">{$t('vd.deepFull')}</span> — {$t('vd.deepFullHint')}</span>
+            </label>
+          </div>
+          <div class="text-[11px] text-neon-amber border border-neon-amber/30 rounded px-2 py-1">⚠ {$t('vd.deepWarn')}</div>
+          <div class="flex items-center gap-2">
+            <button class="hud-btn hud-btn-primary" on:click={runDeepScan}>⌖ {$t('vd.deepGo')}</button>
+            <button class="hud-btn" on:click={() => (deepscan.show = false)}>{$t('g.cancel')}</button>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- Security // exposures (curated exposure scan, Plane A, no creds) -->
     {#if vm.ip}

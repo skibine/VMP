@@ -64,6 +64,7 @@ export const api = {
   diagnose: (id, payload) => req('/api/vms/' + id + '/diagnose', { method: 'POST', body: payload }),
   battery: (id) => req('/api/vms/' + id + '/battery'),
   portScan: (id) => req('/api/vms/' + id + '/portscan'),
+  deepScan: (id, scope) => req('/api/vms/' + id + '/deepscan?scope=' + (scope || 'fast'), { method: 'POST' }),
   exposures: (id) => req('/api/vms/' + id + '/exposures'),
   exposuresScanAll: () => req('/api/exposures/scan-all', { method: 'POST' }),
   ipInfo: (id) => req('/api/vms/' + id + '/ipinfo'),

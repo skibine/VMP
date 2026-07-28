@@ -15,9 +15,12 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/monitor"
 )
 
@@ -26,6 +29,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("POST /api/vms/{id}/diagnose", a.diagnoseVM)
 	mux.HandleFunc("GET /api/vms/{id}/battery", a.batteryVM)
 	mux.HandleFunc("GET /api/vms/{id}/portscan", a.portScanVM)
+	mux.HandleFunc("POST /api/vms/{id}/deepscan", a.deepScanVM)
 	mux.HandleFunc("GET /api/vms/{id}/exposures", a.exposuresVM)
 	mux.HandleFunc("POST /api/exposures/scan-all", a.exposuresScanAll)
 	mux.HandleFunc("GET /api/vms/{id}/ipinfo", a.ipInfoVM)
@@ -113,6 +117,36 @@ func (a *crudAPI) portScanVM(w http.ResponseWriter, r *http.Request) {
 	}
 	ports := monitor.PortScan(r.Context(), host, 8*time.Second)
 	writeJSON(w, http.StatusOK, map[string]any{"host": host, "ports": ports})
+}
+
+// deepScanVM runs a wide TCP port scan (fast ~1k ports, or full 1-65535) to find non-standard
+// open ports the fixed common-port scan misses. Plane A (no creds). Bounded to 4 min so a slow
+// network can't hang it forever; the request context (UI abort) also cancels mid-scan.
+func (a *crudAPI) deepScanVM(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	vm, err := a.st.GetVM(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "deepScanVM", err)
+		return
+	}
+	host := vm.IP
+	if host == "" {
+		host = vm.Hostname
+	}
+	scope := r.URL.Query().Get("scope")
+	if scope != "full" {
+		scope = "fast"
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
+	defer cancel()
+	logging.LDD(a.logger, 8, "deepScanVM", "START", fmt.Sprintf("host=%s scope=%s", host, scope))
+	start := time.Now()
+	open := monitor.DeepScan(ctx, host, scope, 1200*time.Millisecond)
+	logging.LDD(a.logger, 8, "deepScanVM", "DONE", fmt.Sprintf("host=%s open=%d elapsed=%s", host, len(open), time.Since(start).Round(time.Millisecond)))
+	writeJSON(w, http.StatusOK, map[string]any{"host": host, "scope": scope, "open": open, "count": len(open)})
 }
 
 // exposuresVM runs the curated exposure scan (protocol-aware, credential-free) against the VM's
