@@ -176,9 +176,14 @@ func isPermDenied(s string) bool {
 	return false
 }
 
-// reErrLine matches "<iso-ts> <host> <unit>[pid]: <message>" with the [pid] optional, so kernel
-// lines ("<iso> <host> kernel: <msg>") and pid-less units are captured too.
-var reErrLine = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\S+\s+(.+?)(?:\[\d+\])?:\s*(.*)$`)
+// reErrLine matches a journalctl -o short-iso line:
+// "<iso-ts> <host> <unit>[pid]: <message>" — e.g.
+// "2026-07-28T17:59:00+0000 server sshd[360412]: error: kex_exchange_identification: ...".
+// The [pid] is optional (kernel lines: "<iso> <host> kernel: <msg>"); the tz offset is mandatory
+// in short-iso. BUG_FIX_CONTEXT: the old regex expected a space-separated "YYYY-MM-DD HH:MM:SS"
+// (the `short` format), but the command uses `-o short-iso` (ISO with 'T' + tz) — so it never
+// matched and parseErrors always returned 0 even when journalctl returned real errors.
+var reErrLine = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{4})\s+\S+\s+(.+?)(?:\[\d+\])?:\s*(.*)$`)
 
 // parseErrors extracts structured entries from journalctl short-iso output (tolerant).
 func parseErrors(out string) ErrorLog {
