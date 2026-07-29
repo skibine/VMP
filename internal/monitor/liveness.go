@@ -90,10 +90,13 @@ func (LivenessChecker) Run(ctx context.Context, target string, params map[string
 	}
 	if via != "" {
 		return Result{Status: StatusOK, LatencyMS: float64(lat.Microseconds()) / 1000.0,
-			Message: "up via " + via, Detail: map[string]any{"via": via}}
+			Message: "reachable: " + via + " responded", Detail: map[string]any{"via": via}}
 	}
 	_ = start
-	return Result{Status: StatusCritical, Message: "no response (ping/ssh/web/tls all failed)",
+	// Plain observation: VMPulse tried every method and none answered — no interpretation, just what
+	// was seen (the host gave no ICMP reply, no SSH/TCP connection, no HTTP(S) response).
+	return Result{Status: StatusCritical,
+		Message: "host unreachable: no ping reply, no ssh, no http/https response",
 		Detail: map[string]any{"checked": []string{"ping", "ssh", "web", "tls"}}}
 }
 

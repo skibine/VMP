@@ -19,6 +19,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -40,7 +41,21 @@ func (WhoisChecker) Run(ctx context.Context, target string, params map[string]an
 	}
 	warnDays := intOf(params, "warn_days", 30)
 	start := time.Now()
-	wi, err := whoisLookup(ctx, target)
+	var wi WhoisInfo
+	var err error
+	// Honor an explicit server/port (tests + custom whois servers); default to the 2-hop IANA
+	// referral lookup that reaches the authoritative registrar for real expiry data.
+	if server := strOf(params, "server", ""); server != "" {
+		addr := net.JoinHostPort(server, portOf(params, 43))
+		raw, qerr := whoisQuery(ctx, target, addr)
+		err = qerr
+		if qerr == nil {
+			wi = parseWhoisFields(raw)
+			wi.Status = "ok"
+		}
+	} else {
+		wi, err = whoisLookup(ctx, target)
+	}
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 	if err != nil {
 		return Result{Status: StatusCritical, LatencyMS: latency, Message: "whois: " + err.Error(),
@@ -48,6 +63,7 @@ func (WhoisChecker) Run(ctx context.Context, target string, params map[string]an
 	}
 	detail := map[string]any{
 		"target": target, "registrar": wi.Registrar, "expiry": wi.Expiry,
+		"has_expiry": wi.Expiry != "",
 	}
 	if wi.Expiry == "" {
 		detail["days_remaining"] = -1

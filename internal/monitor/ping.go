@@ -66,13 +66,19 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 	timeout := timeoutOf(params, 5*time.Second)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	// Windows: ping -n 1 -w <ms>. Unix: ping -c 1 -W <sec>.
+	// Send 3 packets, "up" if ANY replies (exit 0). ICMP is rate-limited/dropped first by many
+	// firewalls/providers, so a single packet yields spurious "no reply" on intermittent loss;
+	// three packets avoids that false failure. Per-packet wait is bounded so all three finish well
+	// within the overall timeout (no mid-run kill).
+	perWait := timeout / 4
+	if perWait < 500*time.Millisecond {
+		perWait = 500 * time.Millisecond
+	}
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cctx, windowsPing(), "-n", "1", "-w", strconv.FormatInt(timeout.Milliseconds(), 10), target)
+		cmd = exec.CommandContext(cctx, windowsPing(), "-n", "3", "-w", strconv.FormatInt(perWait.Milliseconds(), 10), target)
 	} else {
-		cmd = exec.CommandContext(cctx, "ping", "-c", "1", "-W", strconv.FormatInt(int64(timeout.Seconds()), 10), target)
+		cmd = exec.CommandContext(cctx, "ping", "-c", "3", "-W", strconv.FormatInt(int64(perWait.Seconds()), 10), target)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -80,15 +86,18 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 		if execErr, ok := err.(*exec.Error); ok && execErr.Err == exec.ErrNotFound {
 			return Result{Status: StatusUnknown, Message: "ping binary not found on this host"}
 		}
-		// ping ran but exited non-zero: no reply (host down, unreachable, or dropping ICMP).
-		return Result{Status: StatusCritical, Message: "no reply (host down or unreachable)",
-			Detail: map[string]any{"target": target}}
+		// Plain observation: VMPulse sent 3 ICMP echoes to the target and got no reply. This is what
+		// was seen — NOT an interpretation ("host down"). Many hosts block ICMP; the box may still be
+		// up (verify via the liveness/ssh check).
+		return Result{Status: StatusCritical,
+			Message: fmt.Sprintf("ping: no reply from %s", target),
+			Detail:  map[string]any{"target": target}}
 	}
 	latency := 0.0
 	if m := rePingRTT.FindStringSubmatch(string(out)); len(m) == 3 {
 		latency, _ = strconv.ParseFloat(m[1], 64)
 	}
 	return Result{Status: StatusOK, LatencyMS: latency,
-		Message: fmt.Sprintf("echo reply %.0fms", latency),
-		Detail: map[string]any{"target": target}}
+		Message: fmt.Sprintf("ping: reply %.0fms from %s", latency, target),
+		Detail:  map[string]any{"target": target}}
 }
