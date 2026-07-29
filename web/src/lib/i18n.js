@@ -54,6 +54,8 @@ const en = {
   'list.empty': 'no vms — add one',
   'list.all': 'all',
   'list.allHint': 'overview // {n} vms',
+  'list.servers': 'servers // {n}',
+  'list.domains': 'domains // {n}',
 
   // fleet matrix (grid overview)
   'mx.title': 'fleet // {n}',
@@ -367,6 +369,8 @@ const ru = {
   'list.empty': 'нет ВМ — добавьте',
   'list.all': 'все',
   'list.allHint': 'обзор // ВМ: {n}',
+  'list.servers': 'серверы // {n}',
+  'list.domains': 'домены // {n}',
 
   // fleet matrix (grid overview)
   'mx.title': 'флот // {n}',

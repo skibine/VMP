@@ -11,6 +11,7 @@
   const dispatch = createEventDispatcher()
 
   let vms = []
+  let domains = []
   let health = {} // id -> {status, breakdown:[{check_type,status}]}
   let loading = true
   let err = ''
@@ -34,6 +35,7 @@
     err = ''
     try {
       vms = await api.listVms()
+      domains = (await api.listDomains().catch(() => [])) || []
       await refreshHealth()
     } catch (e) {
       err = e.message
@@ -114,7 +116,7 @@
         {@const st = status(vm)}
         <button
           class="hud-panel p-3 text-left space-y-2 hover:border-neon-green/50 transition-colors"
-          on:click={() => dispatch('select', vm.id)}
+          on:click={() => dispatch('select', { kind: 'vm', id: vm.id })}
         >
           <div class="flex items-center gap-2">
             <span class="h-2.5 w-2.5 rounded-full shrink-0 {lampClass(st)}" title={$t(verdictKey(st))}></span>
@@ -139,5 +141,23 @@
       {/each}
     </div>
     <div class="hud-label text-hud-dim">{$t('mx.clickHint')}</div>
+
+    {#if domains.length}
+      <div class="border-t border-hud-line pt-3 mt-2 space-y-2">
+        <div class="hud-label text-neon-amber">{$t('list.domains', { n: domains.length })}</div>
+        <div class="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+          {#each domains as d (d.id)}
+            <button
+              class="hud-panel p-2.5 text-left hover:border-neon-amber/50 transition-colors flex items-center gap-2"
+              on:click={() => dispatch('select', { kind: 'domain', id: d.id, name: d.name })}
+            >
+              <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-neon-amber/70"></span>
+              <span class="font-mono text-sm text-emerald-100 truncate flex-1">{d.name}</span>
+              <span class="hud-label text-hud-dim shrink-0">↗</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>
