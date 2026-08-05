@@ -19,11 +19,11 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -50,10 +50,51 @@ type PingChecker struct{}
 
 func (PingChecker) Type() string { return "ping" }
 
-// rePingRTT matches "135ms" / "135.4 ms" / "135мс" / "135 мсек" anywhere in ping output, so it works
-// across locales (English "time=135ms", Russian "время=135мс", etc.). TTL/bytes numbers lack the
-// ms unit, so they never match.
-var rePingRTT = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*(ms|мсек|мс)`)
+// rePingRTT matches the RTT number + its time unit across locales AND console encodings:
+//   - "ms"            English ("time=135ms")
+//   - "мсек"/"мс"     Russian in UTF-8 (modern consoles)
+//   - 0xAC 0xE1 ...   Russian "мс"/"мсек" in the cp866 OEM codepage (default RU Windows console) —
+//                     those bytes are NOT valid UTF-8, so without them latency parses as 0 on RU Windows.
+//   - 0xEC 0xF1       Russian "мс" in cp1251.
+// TTL/bytes numbers lack a unit, so they never match. Parsed byte-level (not via regexp) because Go's
+// regexp works on UTF-8 runes and cannot match the raw cp866 bytes of Russian "мс" (invalid UTF-8).
+//
+// parsePingRTT scans ping output for "<number><unit>", where unit is one of: ASCII "ms", UTF-8
+// "мсек"/"мс" (modern consoles), cp866 "мс"/"мсек" (default RU Windows OEM codepage), cp1251 "мс".
+func parsePingRTT(out []byte) float64 {
+	for i := 0; i < len(out); i++ {
+		if out[i] < '0' || out[i] > '9' {
+			continue
+		}
+		j := i
+		for j < len(out) && out[j] >= '0' && out[j] <= '9' {
+			j++
+		}
+		if j < len(out) && out[j] == '.' { // fractional ms (e.g. 12.4ms)
+			j++
+			for j < len(out) && out[j] >= '0' && out[j] <= '9' {
+				j++
+			}
+		}
+		k := j
+		for k < len(out) && (out[k] == ' ' || out[k] == '\t') { // optional space before unit
+			k++
+		}
+		if hasTimeUnit(out[k:]) {
+			f, _ := strconv.ParseFloat(string(out[i:j]), 64)
+			return f
+		}
+		i = j
+	}
+	return 0
+}
+
+func hasTimeUnit(b []byte) bool {
+	return bytes.HasPrefix(b, []byte("ms")) ||
+		bytes.HasPrefix(b, []byte("мсек")) || bytes.HasPrefix(b, []byte("мс")) || // UTF-8
+		bytes.HasPrefix(b, []byte{0xac, 0xe1, 0xa5, 0xaa}) || bytes.HasPrefix(b, []byte{0xac, 0xe1}) || // cp866 мсек/мс
+		bytes.HasPrefix(b, []byte{0xec, 0xf1}) // cp1251 мс
+}
 
 // region FUNC_PingChecker_Run [DOMAIN(7): Monitoring; CONCEPT(7): Probe; TECH(7): os/exec]
 // @purpose Run the system ping once against the target and derive status + latency from its output.
@@ -76,6 +117,8 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 	}
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
+		// Direct call to ping.exe via its full path (SystemRoot\System32\ping.exe) — no shell wrapper,
+		// so it never trips "binary not found" on environments where bare-name PATH lookup fails.
 		cmd = exec.CommandContext(cctx, windowsPing(), "-n", "3", "-w", strconv.FormatInt(perWait.Milliseconds(), 10), target)
 	} else {
 		cmd = exec.CommandContext(cctx, "ping", "-c", "3", "-W", strconv.FormatInt(int64(perWait.Seconds()), 10), target)
@@ -93,10 +136,7 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 			Message: fmt.Sprintf("ping: no reply from %s", target),
 			Detail:  map[string]any{"target": target}}
 	}
-	latency := 0.0
-	if m := rePingRTT.FindStringSubmatch(string(out)); len(m) == 3 {
-		latency, _ = strconv.ParseFloat(m[1], 64)
-	}
+	latency := parsePingRTT(out)
 	return Result{Status: StatusOK, LatencyMS: latency,
 		Message: fmt.Sprintf("ping: reply %.0fms from %s", latency, target),
 		Detail:  map[string]any{"target": target}}

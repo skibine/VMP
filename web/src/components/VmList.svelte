@@ -5,7 +5,11 @@
   import { onMount, onDestroy, createEventDispatcher } from 'svelte'
   import { api } from '../lib/api.js'
   import { t } from '../lib/i18n.js'
+  import { coverage, vmAlerted, refreshAlertCoverage } from '../lib/alerts.js'
+  import { credRevision } from '../lib/stores.js'
   import AddVm from './AddVm.svelte'
+  import Bell from './Bell.svelte'
+  import Lock from './Lock.svelte'
 
   const dispatch = createEventDispatcher()
 
@@ -16,6 +20,7 @@
   let vms = []
   let domains = []
   let health = {} // vm id -> status
+  let domHealth = {} // domain id -> {status, reasons, dns_changed, ...}
   let loading = true
   let error = ''
   let showAddVm = false
@@ -32,10 +37,9 @@
       vms.map(async (v) => {
         try {
           const h = await api.vmHealth(v.id)
-          const anyOk = (h.breakdown || []).some((b) => b.status === 'ok')
-          let st = h.status
-          if (st === 'critical' && anyOk) st = 'warn'
-          return [v.id, st]
+          // Use the backend's worst-case status directly. A server with a critical (down) liveness
+          // check is DOWN — never downgrade it to "warn" just because some other check still passes.
+          return [v.id, h.status]
         } catch (_) {
           return [v.id, 'unknown']
         }
@@ -44,6 +48,26 @@
     health = Object.fromEntries(entries)
   }
 
+  // Domain fleet health: reachability + registration/cert expiry + DNS-change vs baseline. Mirrors
+  // the VM health polling so domain lamps track live status without a page refresh.
+  async function refreshDomHealth() {
+    if (!domains || !domains.length) return
+    const entries = await Promise.all(
+      domains.map(async (d) => {
+        try {
+          return [d.id, await api.domainHealth(d.id)]
+        } catch (_) {
+          return [d.id, { status: 'unknown', reasons: [] }]
+        }
+      })
+    )
+    domHealth = Object.fromEntries(entries)
+  }
+
+  // Liveness-alert bell state is shared (lib/alerts.js): one batch fetch, one "isCovered" rule used
+  // by the sidebar, fleet matrix and VM detail alike. A transient fetch keeps last-known (no blank).
+  $: alertedIds = new Set(vms.filter((v) => vmAlerted(v.id, $coverage)).map((v) => v.id))
+
   async function load() {
     loading = true
     error = ''
@@ -51,7 +75,7 @@
       const [v, d] = await Promise.all([api.listVms().catch(() => []), api.listDomains().catch(() => [])])
       vms = v || []
       domains = d || []
-      await refreshHealth()
+      await Promise.all([refreshHealth(), refreshDomHealth(), refreshAlertCoverage()])
     } catch (e) {
       error = e.message
     } finally {
@@ -79,8 +103,11 @@
   function color(status) {
     return status === 'ok' ? 'neon-green' : status === 'warn' ? 'neon-amber' : status === 'critical' ? 'neon-red' : 'hud-dim'
   }
+  // Bright LED dot (bg + matching text so the .led box-shadow halo follows the status color),
+  // with a breathing pulse on any real status; "unknown" stays a static dim outline.
   function dotClass(status) {
-    return status === 'unknown' ? 'border border-hud-line bg-transparent' : 'bg-' + color(status)
+    if (status === 'unknown') return 'border border-hud-line bg-transparent'
+    return 'bg-' + color(status) + ' text-' + color(status) + ' led led-pulse'
   }
   function dotTitle(status) {
     switch (status) {
@@ -91,12 +118,38 @@
     }
   }
 
+  // Domain status helpers: same LED treatment as servers, colored by fleet health.
+  function domStatus(id) { return domHealth[id]?.status ?? 'ok' }
+  function domDotClass(st) {
+    if (st === 'critical') return 'bg-neon-red text-neon-red led led-pulse'
+    if (st === 'warn') return 'bg-neon-amber text-neon-amber led led-pulse'
+    return 'bg-neon-green text-neon-green led led-pulse'
+  }
+  function domTitle(d) {
+    const h = domHealth[d.id]
+    if (h && h.reasons && h.reasons.length) return h.reasons.join('; ')
+    return $t('list.up')
+  }
+
   let healthTimer
+  let credUnsub
+  let onVisible
   onMount(() => {
     load()
-    healthTimer = setInterval(refreshHealth, 30000)
+    refreshAlertCoverage()
+    healthTimer = setInterval(() => { refreshHealth(); refreshDomHealth() }, 30000)
+    // Browsers throttle setInterval in background tabs, so the status would freeze until the user
+    // returns and manually refreshes. Re-fetch immediately when the tab becomes visible/focused.
+    onVisible = () => { if (!document.hidden) { refreshHealth(); refreshDomHealth(); refreshAlertCoverage() } }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    // Re-fetch the VM list when SSH credentials change anywhere, so the lock badges stay live.
+    credUnsub = credRevision.subscribe(() => load())
   })
-  onDestroy(() => clearInterval(healthTimer))
+  onDestroy(() => {
+    clearInterval(healthTimer); credUnsub && credUnsub()
+    if (onVisible) { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
+  })
 </script>
 
 <div class="h-full flex flex-col">
@@ -123,16 +176,19 @@
       </button>
 
       <!-- servers group -->
-      <button class="w-full text-left px-2 py-1.5 flex items-center gap-1 hover:bg-hud-panel2 border-b border-hud-line/60" on:click={() => (serversOpen = !serversOpen)}>
-        <span class="text-[10px] text-hud-dim w-3">{serversOpen ? '▾' : '▸'}</span>
-        <span class="hud-label text-neon-green">{$t('list.servers', { n: vms.length })}</span>
-        <button class="hud-btn !px-1.5 !py-0 ml-auto !text-[10px]" on:click|stopPropagation={() => (showAddVm = !showAddVm)} title={$t('list.addVm')}>+</button>
-      </button>
-      {#if showAddVm}
-        <div class="p-2 border-b border-hud-line/60">
-          <AddVm on:created={() => { showAddVm = false; dispatch('changed') }} />
-        </div>
-      {/if}
+      <div class="relative">
+        <button class="w-full text-left px-2 py-1.5 flex items-center gap-1 hover:bg-hud-panel2 border-b border-hud-line/60" on:click={() => (serversOpen = !serversOpen)}>
+          <span class="text-[10px] text-hud-dim w-3">{serversOpen ? '▾' : '▸'}</span>
+          <span class="hud-label text-neon-green">{$t('list.servers', { n: vms.length })}</span>
+          <button class="hud-btn !px-1.5 !py-0 ml-auto !text-[10px]" on:click|stopPropagation={() => (showAddVm = !showAddVm)} title={$t('list.addVm')}>{showAddVm ? '−' : '+'}</button>
+        </button>
+        {#if showAddVm}
+          <div class="fixed inset-0 z-[65]" on:click={() => (showAddVm = false)} on:contextmenu|preventDefault={() => (showAddVm = false)}></div>
+          <div class="absolute left-2 right-2 top-full mt-1 hud-panel p-2 z-[70]">
+            <AddVm on:created={() => { showAddVm = false; dispatch('changed') }} />
+          </div>
+        {/if}
+      </div>
       {#if serversOpen}
         {#each vms as vm (vm.id)}
           {@const st = health[vm.id] ?? 'unknown'}
@@ -142,10 +198,12 @@
           >
             <span class="h-2 w-2 rounded-full shrink-0 {dotClass(st)}" title={dotTitle(st)}></span>
             <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
-            <span class="min-w-0">
+            <span class="min-w-0 flex-1">
               <span class="block font-mono text-sm text-emerald-100 truncate">{vm.name}</span>
               <span class="block text-[10px] text-hud-dim font-mono truncate">{vm.ip || vm.hostname}</span>
             </span>
+            {#if vm.has_creds}<Lock size={11} cls="text-neon-amber/80 shrink-0" title={$t('vd.credsSet')} />{/if}
+            {#if alertedIds.has(vm.id)}<Bell size={12} cls="text-neon-green shrink-0" />{/if}
           </button>
         {/each}
         {#if !vms.length}<div class="px-3 py-2 hud-label text-hud-dim">{$t('list.empty')}</div>{/if}
@@ -154,8 +212,8 @@
       <!-- domains group -->
       <button class="w-full text-left px-2 py-1.5 flex items-center gap-1 hover:bg-hud-panel2 border-b border-hud-line/60" on:click={() => (domainsOpen = !domainsOpen)}>
         <span class="text-[10px] text-hud-dim w-3">{domainsOpen ? '▾' : '▸'}</span>
-        <span class="hud-label text-neon-amber">{$t('list.domains', { n: domains.length })}</span>
-        <button class="hud-btn !px-1.5 !py-0 ml-auto !text-[10px]" on:click|stopPropagation={() => (showAddDom = !showAddDom)} title={$t('dom.add')}>+</button>
+        <span class="hud-label text-neon-green">{$t('list.domains', { n: domains.length })}</span>
+        <button class="hud-btn !px-1.5 !py-0 ml-auto !text-[10px]" on:click|stopPropagation={() => (showAddDom = !showAddDom)} title={$t('dom.addDomain')}>{showAddDom ? '−' : '+'}</button>
       </button>
       {#if showAddDom}
         <form class="p-2 border-b border-hud-line/60 flex items-center gap-1" on:submit|preventDefault={addDomain}>
@@ -167,10 +225,10 @@
       {#if domainsOpen}
         {#each domains as d (d.id)}
           <button
-            class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selKind === 'domain' && selId === d.id ? 'bg-hud-panel2 border-l-2 border-l-neon-amber' : ''}"
+            class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selKind === 'domain' && selId === d.id ? 'bg-hud-panel2 border-l-2 border-l-neon-green' : ''}"
             on:click={() => dispatch('select', { kind: 'domain', id: d.id, name: d.name })}
           >
-            <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-neon-amber/70"></span>
+            <span class="inline-block w-2 h-2 rounded-full shrink-0 {domDotClass(domStatus(d.id))}" title={domTitle(d)}></span>
             <span class="min-w-0">
               <span class="block font-mono text-sm text-emerald-100 truncate">{d.name}</span>
               <span class="block text-[10px] text-hud-dim font-mono truncate">{$t('nav.domains')}</span>

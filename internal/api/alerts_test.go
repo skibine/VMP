@@ -96,3 +96,36 @@ func TestHTTP_AlertsList(t *testing.T) {
 		t.Fatalf("alert severity want critical, got %v", arr[0]["severity"])
 	}
 }
+
+// region FUNC_test_validateChannelConfig [DOMAIN(9): Testing; CONCEPT(9): SSRF; TECH(7): net/url]
+// @purpose Verify channel egress hardening: telegram api_url is locked to the official host, and
+// @purpose webhook URLs must be https + non-private/loopback/metadata.
+// @complexity 2
+// endregion FUNC_test_validateChannelConfig
+func TestValidateChannelConfig(t *testing.T) {
+	cases := []struct {
+		name  string
+		typ   string
+		cfg   map[string]any
+		bad   bool
+	}{
+		{"telegram default ok", "telegram", map[string]any{"bot_token": "x"}, false},
+		{"telegram official api_url ok", "telegram", map[string]any{"api_url": "https://api.telegram.org"}, false},
+		{"telegram rogue api_url blocked", "telegram", map[string]any{"api_url": "http://attacker.example"}, true},
+		{"webhook http blocked", "webhook", map[string]any{"url": "http://hook.example/x"}, true},
+		{"webhook https ok", "webhook", map[string]any{"url": "https://hook.example/x"}, false},
+		{"webhook loopback blocked", "webhook", map[string]any{"url": "https://127.0.0.1/x"}, true},
+		{"webhook metadata blocked", "webhook", map[string]any{"url": "https://169.254.169.254/latest/"}, true},
+		{"webhook private blocked", "webhook", map[string]any{"url": "https://10.0.0.5/x"}, true},
+	}
+	for _, c := range cases {
+		msg := validateChannelConfig(c.typ, c.cfg)
+		if c.bad && msg == "" {
+			t.Errorf("%s: expected rejection, got ok", c.name)
+		}
+		if !c.bad && msg != "" {
+			t.Errorf("%s: expected ok, got %q", c.name, msg)
+		}
+	}
+	t.Log("[IMP:9][TestValidateChannelConfig][RESULT] 8 cases checked")
+}

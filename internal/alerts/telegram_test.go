@@ -65,3 +65,55 @@ func TestTelegramChannel_Errors(t *testing.T) {
 		t.Fatalf("expected status-400 error, got %v", err)
 	}
 }
+
+// region FUNC_test_ResolveChatID [DOMAIN(7): Testing; CONCEPT(8): Onboarding; TECH(8): httptest]
+// @purpose Verify chat_id auto-capture: getUpdates is parsed correctly and the last message's chat
+// @purpose id is returned; empty result yields a helpful error.
+// @complexity 3
+// endregion FUNC_test_ResolveChatID
+func TestResolveTelegramChatID(t *testing.T) {
+	// Server returns one update carrying a message with chat.id=42424242.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/getUpdates") {
+			t.Errorf("expected getUpdates path, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":1,"message":{"message_id":9,"chat":{"id":42424242,"first_name":"alex"},"text":"/start"}}]}`))
+	}))
+	defer srv.Close()
+
+	id, err := ResolveTelegramChatID(context.Background(), "123:ABC", srv.URL)
+	if err != nil {
+		t.Fatalf("ResolveTelegramChatID: %v", err)
+	}
+	if id != "42424242" {
+		t.Fatalf("expected chat_id 42424242, got %s", id)
+	}
+	t.Logf("[IMP:8][TestResolveChatID][RESULT] captured chat_id=%s", id)
+
+	// Empty result -> friendly error (operator hasn't messaged the bot yet).
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer empty.Close()
+	if _, err := ResolveTelegramChatID(context.Background(), "123:ABC", empty.URL); err == nil {
+		t.Fatal("expected error when no messages are present")
+	}
+}
+
+// region FUNC_test_RedactToken [DOMAIN(8): Testing; CONCEPT(9): SecretHygiene; TECH(7): regexp]
+// @purpose Verify a transport failure never leaks the bot token: net/http's *url.Error embeds the
+// @purpose full /bot<TOKEN>/... URL, which must be scrubbed from the returned (and logged) error.
+// @complexity 2
+// endregion FUNC_test_RedactToken
+func TestResolveTelegramChatID_RedactsToken(t *testing.T) {
+	// Point at a closed port so client.Do returns a url.Error carrying the token-bearing URL.
+	_, err := ResolveTelegramChatID(context.Background(), "777777:SECRETsecretSECRET", "http://127.0.0.1:1")
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if strings.Contains(err.Error(), "777777:SECRETsecretSECRET") || strings.Contains(err.Error(), "SECRETsecret") {
+		t.Fatalf("bot token leaked into error: %s", err.Error())
+	}
+	t.Logf("[IMP:9][TestRedactToken][RESULT] error=%s", err.Error())
+}

@@ -103,3 +103,23 @@ func (s *Store) DeleteVMCredentials(ctx context.Context, vmID int64) error {
 	}
 	return nil
 }
+
+// VMsWithCreds returns the set of VM ids that have a stored credentials row (any auth type). This is
+// the per-VM view of HasAnyVMCredentials — used to render the lock badge in the fleet/sidebar and to
+// tell the operator exactly which servers block 2FA disable.
+func (s *Store) VMsWithCreds(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT vm_id FROM vm_credentials`)
+	if err != nil {
+		return nil, fmt.Errorf("VMsWithCreds: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("VMsWithCreds scan: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}

@@ -121,3 +121,28 @@ body {
     }
   }
 }
+
+/* region LED status dots [DOMAIN(6): Design; CONCEPT(7): Status; TECH(5): css-animation]
+   A status dot reads as a lit LED: a soft colored halo plus a slow "breathing" pulse so an
+   "ok" reads unmistakably as alive. Pair bg-<color> with text-<color> on the same dot so
+   box-shadow: currentColor picks the right color for every status. Applied to ok/warn/critical
+   dots across the fleet sidebar, fleet tiles, VM header lamp and domain rows; "unknown" stays
+   static and dim. */
+.led {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, currentColor 30%, transparent),
+    0 0 3px currentColor,
+    0 0 6px currentColor;
+}
+.led-pulse {
+  animation: led-pulse 2.6s ease-in-out infinite;
+}
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

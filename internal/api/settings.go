@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/skibine/vm-pulse/internal/auth"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
@@ -29,6 +30,8 @@ import (
 func registerSettings(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/settings/ai", a.getAISettings)
 	mux.HandleFunc("PUT /api/settings/ai", a.updateAISettings)
+	mux.HandleFunc("GET /api/settings/locale", a.getLocale)
+	mux.HandleFunc("PUT /api/settings/locale", a.setLocale)
 
 	// AI model discovery: provider /models proxy + localhost LLM detection.
 	mux.HandleFunc("GET /api/ai/models", a.aiModels)
@@ -44,8 +47,34 @@ func registerSettings(mux *http.ServeMux, a *crudAPI) {
 
 // ── AI settings ─────────────────────────────────────────────────────────────────────
 
-func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {
-	cfg, err := a.st.GetAIConfig(r.Context())
+// getLocale returns the operator's UI locale (drives alert-message language).
+func (a *crudAPI) getLocale(w http.ResponseWriter, r *http.Request) {
+	loc, _ := a.st.GetSetting(r.Context(), "ui_locale")
+	if loc == "" {
+		loc = "en"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"locale": loc})
+}
+
+// setLocale stores the operator's UI locale so server-side alerts are sent in that language.
+func (a *crudAPI) setLocale(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Locale string `json:"locale"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.Locale != "ru" && body.Locale != "en" {
+		body.Locale = "en"
+	}
+	if err := a.st.SetSetting(r.Context(), "ui_locale", body.Locale, false); err != nil {
+		a.writeErr(w, "setLocale", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"locale": body.Locale})
+}
+
+func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {	cfg, err := a.st.GetAIConfig(r.Context())
 	if err != nil {
 		a.writeErr(w, "getAISettings", err)
 		return
@@ -172,6 +201,16 @@ func (a *crudAPI) setVMCreds(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
+	}
+	// Cred-gate (symmetric to the one on 2FA-disable): storing SSH credentials requires 2FA on.
+	// The vault holds privileged secrets — they must never sit behind a single-factor login.
+	if uid, ok := auth.FromContext(r.Context()); ok {
+		if u, err := a.st.GetUser(r.Context(), uid); err != nil || !u.TOTPEnabled {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "enable 2FA before storing SSH credentials — open Settings → 2FA",
+			})
+			return
+		}
 	}
 	var body struct {
 		SSHUser       string `json:"ssh_user"`

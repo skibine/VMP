@@ -2,6 +2,10 @@
   import { createEventDispatcher, onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import { t } from '../lib/i18n.js'
+  import { bumpAlerts, gotoSettings, bumpCreds } from '../lib/stores.js'
+  import { coverage, vmAlerted, refreshAlertCoverage } from '../lib/alerts.js'
+  import Bell from './Bell.svelte'
+  import Lock from './Lock.svelte'
   import Terminal from './Terminal.svelte'
   import MetricsChart from './MetricsChart.svelte'
 
@@ -27,6 +31,7 @@
   let cred = { ssh_user: '', auth_type: 'password', has_secret: false, has_sudo: false, secret: '', key_passphrase: '', sudo_password: '', msg: '', ok: false, busy: false }
   let validate = { kind: '', detail: '' }
   let system = null // inventory from cred-save probe
+  let twofaOn = true // 2FA enabled? loaded per-select; SSH credentials cannot be saved without it
 
   let diag = { check_type: 'tcp', param: '', busy: false, msg: '', res: null }
   let nc = { check_type: 'ping', target: '', interval_sec: 60 }
@@ -99,6 +104,7 @@
 
   $: vmId != null && loadDetail(vmId)
   $: vmId != null && loadBattery(vmId)
+  $: vmId != null && refreshAlertCoverage() // ensure the shared bell coverage is fresh for this VM
   $: vmId != null && loadPortScan(vmId)
   // Whether the battery found a web server on :80 (gates the site-info panel).
   $: batteryWebOk = battery.probes.some((p) => p.name === 'web' && p.status === 'ok')
@@ -127,6 +133,66 @@
       if (id !== vmId) return
       battery = { probes: [], reachable: false, latency_ms: 0, busy: false, err: e.message }
     }
+  }
+
+  // Per-server alert routing uses the SHARED coverage store. The bell is ON when the server is
+  // covered by a rule AND has >=1 delivery channel attached (in-app / telegram / webhook — all
+  // optional, chosen in the picker). in-app is just another selectable channel.
+  let bellOpen = false
+  let vmAlertBusy = false
+  let vmAlertMsg = ''
+  let pickerSel = new Set() // working selection of channels in the open picker
+  $: bellOn = vmId != null && vmAlerted(vmId, $coverage)
+  $: bellTitle = bellOn ? $t('vd.alertOnHint') : $t('vd.alertHint')
+  function openBell() {
+    if (vmAlertBusy) return
+    pickerSel = new Set($coverage.vmChannels.get(vmId) || [])
+    bellOpen = true
+  }
+  // Save the picker: apply the chosen channels (in-app / telegram / webhook — all optional). With
+  // channels selected -> ensure coverage (scoped rule if no fleet) + unmute. With none selected ->
+  // remove coverage (delete scoped rule, or mute under the fleet rule): bell off, no delivery.
+  async function savePicker() {
+    vmAlertBusy = true; vmAlertMsg = ''
+    const ids = [...pickerSel]
+    try {
+      await api.setVMAlertChannels(vmId, ids)
+      if (ids.length > 0) {
+        if (!$coverage.fleetOn && !$coverage.scopedIds.has(vmId)) {
+          await api.createAlertRule({
+            name: (vm.name || 'server') + ' down', check_type: 'liveness', trigger_status: 'critical',
+            severity: 'critical', cooldown_sec: 300, vm_id: vmId, enabled: true,
+          })
+        }
+        if ($coverage.mutedIds.has(vmId)) { await api.setAlertMute(vmId, false) }
+      } else {
+        await removeCoverage()
+      }
+      bellOpen = false
+      await refreshAlertCoverage()
+      bumpAlerts()
+    } catch (e) { vmAlertMsg = e.message } finally { vmAlertBusy = false }
+  }
+  // removeCoverage: delete this VM's scoped rule, or mute it under the fleet rule.
+  async function removeCoverage() {
+    if ($coverage.scopedIds.has(vmId)) {
+      const rules = await api.listAlertRules()
+      const scoped = (rules || []).find((r) => r.vm_id === vmId && r.check_type === 'liveness')
+      if (scoped) await api.deleteAlertRule(scoped.id)
+    } else if ($coverage.fleetOn) {
+      await api.setAlertMute(vmId, true)
+    }
+  }
+  // Turn this server's alert OFF (explicit button): clear channels + remove coverage.
+  async function turnOffAlert() {
+    vmAlertBusy = true; vmAlertMsg = ''
+    try {
+      await api.setVMAlertChannels(vmId, [])
+      await removeCoverage()
+      bellOpen = false
+      await refreshAlertCoverage()
+      bumpAlerts()
+    } catch (e) { vmAlertMsg = e.message } finally { vmAlertBusy = false }
   }
 
   async function loadPortScan(id) {
@@ -290,17 +356,19 @@
       validate = { kind: '', detail: '' }
     }
     try {
-      const [v, h, r, c, cr] = await Promise.all([
+      const [v, h, r, c, cr, fa] = await Promise.all([
         api.getVm(id).catch(() => null),
         api.vmHealth(id).catch(() => null),
         api.vmResults(id).catch(() => []),
         api.listChecks(id).catch(() => []),
-        api.getVMCreds(id).catch(() => ({ has_secret: false, ssh_user: '', auth_type: 'password' }))
+        api.getVMCreds(id).catch(() => ({ has_secret: false, ssh_user: '', auth_type: 'password' })),
+        api.twoFAStatus().catch(() => ({ enabled: true }))
       ])
       vm = v
       health = h
       results = r || []
       checks = c || []
+      twofaOn = !!fa.enabled
       // Pre-fill the exposures panel with the LAST stored scan (from the periodic exposures check),
       // so it isn't empty on VM open — the "scan" button re-runs fresh. The findings live in the
       // check result's latest_detail.findings.
@@ -327,7 +395,7 @@
   // stays "up" even if a monitored service (e.g. ssh:22) is critical.
   $: headerVerdict = battery.busy ? '…' : (livenessUp ? 'up' : (battery.probes.length ? 'down' : '…'))
   $: headerColor = headerVerdict === 'up' ? 'neon-green' : headerVerdict === 'down' ? 'neon-red' : 'hud-dim'
-  $: lampClass = headerVerdict === 'up' ? 'bg-neon-green' : headerVerdict === 'down' ? 'bg-neon-red' : 'bg-hud-dim'
+  $: lampClass = headerVerdict === 'up' ? 'bg-neon-green text-neon-green led led-pulse' : headerVerdict === 'down' ? 'bg-neon-red text-neon-red led led-pulse' : 'bg-hud-dim'
   $: healthReason = (() => {
     if (!health || health.status === 'ok') return ''
     const rank = { critical: 3, warn: 2, unknown: 1 }
@@ -452,6 +520,7 @@
       cred.secret = ''; cred.key_passphrase = ''; cred.sudo_password = ''
       const fresh = await api.getVMCreds(vmId)
       cred.has_secret = !!fresh.has_secret; cred.has_sudo = !!fresh.has_sudo; cred.ssh_user = fresh.ssh_user; cred.auth_type = fresh.auth_type
+      bumpCreds() // refresh lock badges in sidebar/fleet
       if (res && res.validated) {
         cred.msg = 'saved ✓ connected'; cred.ok = true
         if (res.inventory) system = res.inventory
@@ -467,7 +536,7 @@
 
   async function clearCred() {
     cred.busy = true
-    try { await api.deleteVMCreds(vmId); cred.has_secret = false; cred.msg = 'cleared'; cred.ok = true }
+    try { await api.deleteVMCreds(vmId); cred.has_secret = false; cred.msg = 'cleared'; cred.ok = true; bumpCreds() }
     catch (e) { cred.msg = e.message; cred.ok = false } finally { cred.busy = false }
   }
 
@@ -574,7 +643,7 @@
       <div class="flex items-center gap-2">
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {lampClass}" title={headerVerdict}></span>
         <h2 class="font-mono text-neon-green text-base truncate">{vm.name}</h2>
-        <span class="text-xs text-hud-dim font-mono shrink-0">{vm.ip || vm.hostname}{vm.port_ssh ? ':' + vm.port_ssh : ''}</span>
+        <span class="text-xs text-hud-dim font-mono shrink-0">{vm.ip || vm.hostname}{vm.port_ssh && vm.port_ssh !== 22 ? ':' + vm.port_ssh : ''}</span>
         <span class="hud-label text-{headerColor} uppercase shrink-0 ml-auto">{headerVerdict === 'up' ? $t('vd.up') : headerVerdict === 'down' ? $t('vd.down') : headerVerdict}</span>
         <button class="hud-btn !py-0.5 !px-2 !text-xs shrink-0" on:click={() => (editMode = !editMode)} title={$t('vd.edit')}>{editMode ? $t('g.close') : $t('vd.edit')}</button>
       </div>
@@ -586,7 +655,7 @@
       <div class="flex flex-wrap gap-1 items-center">
         {#each vm.tags as tag}<span class="hud-label border border-hud-line rounded px-1.5 py-0.5">{tag}</span>{/each}
         <span class="hud-label border rounded px-1.5 py-0.5 {vm.ai_enabled ? 'text-neon-cyan border-neon-cyan/40' : 'text-hud-dim border-hud-line'}" title={$t('vd.aiAccessHint')}>{vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}</span>
-        <span class="hud-label border rounded px-1.5 py-0.5 {cred.has_secret ? 'text-neon-green border-neon-green/30' : 'text-hud-dim border-hud-line'}" title={$t('vd.sshCreds')}>{cred.has_secret ? $t('vd.credsSet') : $t('vd.credsNone')}</span>
+        <span class="hud-label border rounded px-1.5 py-0.5 inline-flex items-center gap-1 {cred.has_secret ? 'text-neon-green border-neon-green/30' : 'text-hud-dim border-hud-line'}" title={$t('vd.sshCreds')}>{#if cred.has_secret}<Lock size={10} cls="text-neon-green" />{/if}{cred.has_secret ? $t('vd.credsSet') : $t('vd.credsNone')}</span>
       </div>
     </div>
 
@@ -612,21 +681,26 @@
         </div>
         <div class="border-t border-hud-line pt-3">
           <div class="flex items-center gap-2 mb-2"><span class="hud-label text-neon-cyan">{$t('vd.sshCreds')}</span>{#if cred.has_secret}<span class="hud-label text-neon-green border border-neon-green/30 rounded px-1.5">{$t('vd.credsSet')}</span>{:else}<span class="hud-label text-hud-dim border border-hud-line rounded px-1.5">{$t('vd.credsNone')}</span>{/if}</div>
+          {#if !twofaOn}
+            <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5 mb-2">
+              {$t('vd.2faRequiredCred')} <button type="button" class="text-neon-cyan underline cursor-pointer" on:click={() => gotoSettings.set(true)}>{$t('vd.2faGoSettings')}</button>
+            </div>
+          {/if}
           <div class="grid grid-cols-3 gap-2">
             <input class="hud-input" placeholder={$t('vd.sshUserPh')} bind:value={cred.ssh_user} />
-            <select class="hud-input" bind:value={cred.auth_type}><option value="password">password</option><option value="key">key</option><option value="agent">agent</option></select>
+            <select class="hud-input" bind:value={cred.auth_type} disabled={!twofaOn}><option value="password">password</option><option value="key">key</option><option value="agent">agent</option></select>
             {#if cred.auth_type === 'key'}
-              <textarea class="hud-input font-mono resize-none" rows="2" placeholder={credPH} bind:value={cred.secret}></textarea>
+              <textarea class="hud-input font-mono resize-none" rows="2" placeholder={credPH} bind:value={cred.secret} disabled={!twofaOn}></textarea>
             {:else}
-              <input class="hud-input" type="password" placeholder={credPH} bind:value={cred.secret} />
+              <input class="hud-input" type="password" placeholder={credPH} bind:value={cred.secret} disabled={!twofaOn} />
             {/if}
           </div>
           {#if cred.auth_type === 'key'}
-            <input class="hud-input mt-2" type="password" placeholder={$t('vd.keyPassph')} bind:value={cred.key_passphrase} />
+            <input class="hud-input mt-2" type="password" placeholder={$t('vd.keyPassph')} bind:value={cred.key_passphrase} disabled={!twofaOn} />
           {/if}
-          <input class="hud-input mt-2" type="password" placeholder={$t('vd.sudoPw')} bind:value={cred.sudo_password} />
+          <input class="hud-input mt-2" type="password" placeholder={$t('vd.sudoPw')} bind:value={cred.sudo_password} disabled={!twofaOn} />
           {#if cred.has_sudo && !cred.sudo_password}<span class="hud-label text-neon-green mt-1 inline-block">{$t('vd.sudoSet')}</span>{/if}
-          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy}>{cred.busy ? $t('g.saving') : $t('vd.saveProbe')}</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>{$t('vd.clear')}</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-amber'}">{cred.msg}</span>{/if}</div>
+          <div class="flex items-center gap-2 mt-2"><button class="hud-btn hud-btn-primary" on:click={saveCred} disabled={cred.busy || !twofaOn}>{cred.busy ? $t('g.saving') : $t('vd.saveProbe')}</button><button class="hud-btn" on:click={clearCred} disabled={cred.busy || !cred.has_secret}>{$t('vd.clear')}</button>{#if cred.msg}<span class="text-xs font-mono {cred.ok ? 'text-neon-green' : 'text-neon-amber'}">{cred.msg}</span>{/if}</div>
           {#if validate.kind}
             <div class="text-xs font-mono text-neon-red mt-2">
               {$t('vd.connCheck')} <span class="uppercase">{validate.kind}</span> {#if validate.kind === 'no_credentials'}{$t('vd.errSecret')}{:else if validate.kind === 'auth_failed'}{$t('vd.errAuth')}{:else if validate.kind === 'host_key_changed'}— <button class="hud-btn !px-2 !py-0.5" on:click={resetHostKey}>{$t('vd.resetHostKey')}</button>{/if}
@@ -654,7 +728,37 @@
           <span class="hud-label ml-auto uppercase {livenessUp ? 'text-neon-green' : 'text-neon-red'}">{livenessUp ? $t('vd.up') : $t('vd.down')} · <span class="normal-case">{livenessEvidence}</span></span>
         {/if}
         <button class="hud-btn !py-0.5" on:click={() => loadBattery(vmId)} disabled={battery.busy}>{battery.busy ? '…' : '↻'}</button>
+        <div class="relative inline-flex">
+          <button class="hud-btn inline-flex items-center justify-center leading-none !py-1 !px-2 {bellOn ? '!bg-neon-green/15 !border-neon-green/50' : ''}" on:click={() => (bellOpen ? (bellOpen = false) : openBell())} disabled={vmAlertBusy} title={bellTitle}>
+            {#if vmAlertBusy}…{:else}<Bell size={13} cls={bellOn ? 'text-neon-green' : 'text-neon-green/40'} />{/if}
+          </button>
+          {#if bellOpen}
+            <div class="fixed inset-0 z-[65]" on:click={() => (bellOpen = false)} on:contextmenu|preventDefault={() => (bellOpen = false)}></div>
+            <div class="absolute right-0 mt-1 w-64 hud-panel p-2 z-[70] space-y-1">
+              <div class="hud-label text-neon-cyan">{$t('vd.alertChannels')}</div>
+              {#if $coverage.channels.length}
+                <div class="max-h-48 overflow-auto space-y-0.5">
+                  {#each $coverage.channels as c (c.id)}
+                    <label class="flex items-center gap-2 text-xs font-mono cursor-pointer px-1 py-0.5 hover:bg-hud-panel2 rounded">
+                      <input type="checkbox" class="accent-neon-green" checked={pickerSel.has(c.id)} on:change={(e) => { if (e.currentTarget.checked) pickerSel = new Set([...pickerSel, c.id]); else { const n = new Set(pickerSel); n.delete(c.id); pickerSel = n } }} />
+                      <span class="text-neon-cyan uppercase w-16">{c.type}</span>
+                      <span class="text-emerald-100 truncate">{c.name}</span>
+                    </label>
+                  {/each}
+                </div>
+              {:else}
+                <div class="text-[11px] text-hud-dim">{$t('mx.noExternalChannel')} <button type="button" class="text-neon-cyan underline" on:click={() => gotoSettings.set(true)}>{$t('mx.configure')} →</button></div>
+              {/if}
+              <div class="flex items-center gap-1 pt-1">
+                <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px]" on:click={savePicker} disabled={vmAlertBusy}>{$t('g.save')}</button>
+                {#if bellOn}<button class="hud-btn !text-neon-red border-neon-red/40 !py-0.5 !text-[10px]" on:click={turnOffAlert} disabled={vmAlertBusy}>{$t('g.off')}</button>{/if}
+                <button class="hud-btn !py-0.5 !text-[10px] ml-auto" on:click={() => (bellOpen = false)}>{$t('g.cancel')}</button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
+      {#if vmAlertMsg}<div class="text-[10px] text-neon-amber font-mono">{vmAlertMsg}</div>{/if}
       {#if battery.busy}
         <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('vd.probingBattery')}</div>
       {:else if battery.err}
@@ -1098,7 +1202,7 @@
             {#each userChecks as c (c.id)}
               {@const r = results.find((x) => x.check_id === c.id)}
               <div class="flex items-center gap-2 text-xs font-mono border border-hud-line rounded px-2 py-1">
-                <span class="text-emerald-200 w-14">{c.check_type}</span>
+                <span class="text-emerald-200 w-24 shrink-0">{checkKey(c)}</span>
                 {#if r}<span class="hud-label {r.latest_status === 'ok' ? 'text-neon-green' : r.latest_status === 'critical' ? 'text-neon-red' : 'text-neon-amber'}">{r.latest_status}</span><span class="text-hud-dim">{Number(r.latest_latency_ms).toFixed(1)}ms</span>{#if r.latest_message && r.latest_status !== 'ok'}<span class="text-neon-amber/80 truncate">{r.latest_message}</span>{/if}{:else}<span class="hud-label text-hud-dim">pending</span>{/if}
                 <span class="ml-auto text-hud-dim">/{c.interval_sec}s</span>
                 <button class="hud-btn !px-2 !py-0.5" on:click={() => runNow(c)} title="run now">▶</button>

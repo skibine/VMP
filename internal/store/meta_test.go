@@ -77,7 +77,14 @@ func TestChannelConfig_EncryptedAtRest(t *testing.T) {
 		t.Fatalf("decrypted bot_token mismatch: %v", ch.Config["bot_token"])
 	}
 	list, _ := s.ListChannels(ctx)
-	if len(list) != 1 || list[0].Config["chat_id"] != "42" {
+	// A fresh store auto-seeds a built-in "in-app" channel, so find the telegram one explicitly.
+	var tg *Channel
+	for i := range list {
+		if list[i].Type == "telegram" {
+			tg = &list[i]
+		}
+	}
+	if tg == nil || tg.Config["chat_id"] != "42" {
 		t.Fatalf("ListChannels decrypt mismatch: %+v", list)
 	}
 

@@ -6,6 +6,7 @@
 // ssh_user, model, ...), brand names (VM Pulse / VMPilot) and VM-sourced data untranslated.
 // STRUCTURE: ▶ ┌locale┐ → derived → 〈dict[locale][key] ?? key〉 → ⊕ {param} inject → ⎋ string
 import { writable, derived } from 'svelte/store'
+import { api } from './api.js'
 
 const LOCALE_KEY = 'vmpulse_locale'
 
@@ -14,13 +15,22 @@ locale.subscribe((v) => localStorage.setItem(LOCALE_KEY, v))
 
 export function setLocale(v) {
   locale.set(v)
+  // Persist to the server so alert messages are sent in the operator's chosen language.
+  api.setLocale(v).catch(() => {})
+}
+
+// On login, adopt the locale stored server-side (keeps server-delivered alerts in sync with the UI).
+export async function initLocaleFromServer() {
+  try {
+    const r = await api.getLocale()
+    if (r.locale === 'ru' || r.locale === 'en') locale.set(r.locale)
+  } catch (_) {}
 }
 
 const en = {
   // nav / header
   'nav.fleet': 'fleet',
   'nav.domains': 'domains',
-  'nav.alerts': 'alerts',
   'nav.settings': 'settings',
   'nav.logout': 'logout',
   'nav.user': 'user:',
@@ -30,6 +40,9 @@ const en = {
 
   // generic
   'g.save': 'save',
+  'g.off': 'off',
+  'g.edit': 'edit',
+  'g.cancel': 'cancel',
   'g.clear': 'clear',
   'g.close': '✕ close',
   'g.refresh': '↻ refresh',
@@ -45,8 +58,9 @@ const en = {
 
   // vm list
   'list.fleet': 'fleet // {n}',
-  'list.addVm': '+ vm',
+  'list.addVm': '+ server',
   'list.up': 'up — all checks ok',
+  'list.alertOn': 'liveness alert on',
   'list.warn': 'up, but a monitored service is failing (amber)',
   'list.down': 'no check succeeded — likely down (red)',
   'list.unknown': 'unmonitored — add a ping check in monitoring to track this VM',
@@ -65,6 +79,14 @@ const en = {
   'mx.unknown': 'unmonitored',
   'mx.refresh': '↻ refresh',
   'mx.scanAll': '🛡 scan security',
+  'mx.allVmAlert': 'all servers',
+  'mx.inAppBell': 'in-app bell (always on)',
+  'mx.noExternalChannel': '// no telegram/webhook yet — alerts will fire in-app only.',
+  'mx.configure': 'configure channels',
+  'mx.enable': 'enable',
+  'mx.allVmAlertHint': 'enable liveness alerts for ALL servers (in-app always; add telegram/webhook below)',
+  'mx.allVmAlertChannels': 'channels for all servers',
+  'mx.allVmAlertApply': '// applies these channels to every server (bulk). tweak individual servers in their bell.',
   'mx.scanAllHint': 're-scan security exposures for every host now (use after fixing a server-wide issue — clears stale alerts fleet-wide)',
   'mx.scanning': 'scanning…',
   'mx.empty': 'no vms — add one',
@@ -86,15 +108,16 @@ const en = {
 
   // add vm
   'addvm.name': 'name',
+  'addvm.host': 'host (hostname or ip)',
   'addvm.hostname': 'hostname',
   'addvm.ip': 'ip',
   'addvm.sshPort': 'ssh port',
   'addvm.deploying': 'deploying…',
-  'addvm.submit': 'add vm',
+  'addvm.submit': 'add server',
 
   // domains
   'dom.title': 'domains // {n}',
-  'dom.add': '+ add domain',
+  'dom.addDomain': '+ add domain',
   'dom.empty': '// no domains — add one to track its DNS, cert expiry and whois age.',
   'dom.probe': 'probe',
   'dom.info': 'domain // info',
@@ -103,8 +126,38 @@ const en = {
   'dom.noTls': 'no TLS / port 443 closed',
   'dom.dns': 'dns',
   'dom.noRecords': 'no records',
+  'dom.ipInfo': 'ip // info',
+  'dom.ipInfoGo': 'lookup geo/ASN',
+  'dom.noIp': 'no resolved IPs',
+  'dom.ports': 'ports // scan',
+  'dom.portsGo': 'scan common ports',
+  'dom.noPorts': 'no common ports open',
   'dom.whois': 'whois',
   'dom.confirmDelete': 'Remove this domain?',
+  'dom.reminders': 'reminders',
+  'dom.remindersHint': '// reminders: notify via your alert channels this many days before expiry; repeat every N days re-fires while still in window (0 = once). checked every ~6h.',
+  'dom.reminderSaved': 'reminders saved ✓',
+  'dom.setReminder': '⏰ set reminder',
+  'dom.days': 'days before',
+  'dom.repeat': 'repeat every (days, 0=once)',
+  'dom.repeatShort': '↻{n}d',
+  'dom.repeatOnce': 'once (no repeat)',
+  'dom.repeat3': 'every 3 days',
+  'dom.repeat7': 'weekly',
+  'dom.repeat14': 'every 2 weeks',
+  'dom.repeat30': 'monthly',
+  'dom.add': '+ add',
+  'dom.daysRequired': 'enter days first',
+  'dom.inApp': 'in-app (bell)',
+  'dom.enableDns': 'alert on DNS change',
+  'dom.dnsAck': 'acknowledge',
+  'dom.dnsAckOk': 'dns change acknowledged ✓',
+  'dom.change': 'change',
+  'dom.noChannelHint': '// no telegram/webhook yet — configure one in alerts, or use in-app.',
+  'nt.title': 'notifications',
+  'nt.empty': 'no notifications',
+  'nt.fired': 'fired alerts',
+  'nt.markAll': 'mark all read',
 
   // chat
   'chat.ctx': 'ctx: last 8 turns',
@@ -168,6 +221,10 @@ const en = {
   'set.2faOff': 'off',
   'set.2faHint': '// recommended. while any VM stores SSH credentials, 2FA cannot be disabled — privileged access needs a hardened login.',
   'set.2faIsOn': '2FA is on. A TOTP code (or backup code) is required at login.',
+  'set.2faNeedPw': 'enter your account password above to confirm disabling 2FA.',
+  'set.2faCannotDisable': '🔒 2FA is locked on: at least one server still stores SSH credentials.',
+  'set.2faClearThese': 'servers with stored credentials',
+  'set.2faClearHint': '// open each, ⚙ edit → "clear" the SSH credentials, then come back to disable 2FA.',
   'set.passwordToDisable': 'password (to disable)',
   'set.disable2fa': 'disable 2FA',
   'set.enable2fa': 'enable 2FA',
@@ -189,6 +246,32 @@ const en = {
   'al.urlPh': 'webhook url (https://...)',
   'al.secretPh': 'secret (optional — signs body with HMAC-SHA256)',
   'al.addChannel': '+ add {type} channel',
+  // delivery channels (Settings)
+  'ch.title': 'delivery channels // {n}',
+  'ch.hint': '// where alerts go: telegram (bot_token + chat_id from @BotFather) or webhook.',
+  'ch.webhook': 'webhook',
+  'ch.namePh': 'name (optional)',
+  'ch.urlPh': 'https://hook.example.com/...',
+  'ch.secretPh': 'hmac secret (optional)',
+  'ch.add': '+ add {type}',
+  'ch.added': 'channel added',
+  'ch.saved': 'channel saved',
+  'ch.editSecretHint': 'leave the token blank to keep the existing one',
+  'ch.test': 'test',
+  'ch.testOk': '✓ test message delivered',
+  'ch.testFail': 'delivery failed',
+  'ch.confirmDelete': 'delete this channel?',
+  'ch.tokenPh': 'bot_token (from BotFather)',
+  'ch.chatPh': 'chat_id',
+  'ch.resolve': 'auto chat_id',
+  'ch.resolveHint': 'send any message to your bot, then click — chat_id is captured automatically',
+  'ch.needToken': 'paste the bot_token first',
+  'ch.resolved': '✓ chat_id captured',
+  'ch.resolveFail': 'could not capture chat_id',
+  'ch.tgStep1': '1) create a bot in',
+  'ch.tgStep1b': '(/newbot), copy its token, paste above.',
+  'ch.tgStep2': '2) open your new bot in Telegram and send it any message (/start works).',
+  'ch.tgStep3': '3) press “auto chat_id” — the id fills in. then add the channel.',
   'al.confirmDeleteChannel': 'Delete this channel?',
   'al.rules': 'rules // {n}',
   'al.rulesHint': '// when to notify. A rule fires when a check reaches the trigger status; the cooldown prevents spam. check_type empty = any check (incl. the always-on liveness).',
@@ -222,6 +305,8 @@ const en = {
   'vd.aiOffState': '(off)',
   'vd.aiAccessHint': '// grant the assistant read access to this VM',
   'vd.sshCreds': 'ssh credentials',
+  'vd.2faRequiredCred': '🔒 to store SSH credentials you must enable 2FA first.',
+  'vd.2faGoSettings': 'open Settings → 2FA →',
   'vd.credsSet': 'set',
   'vd.credsNone': 'none',
   'vd.sshUserPh': 'ssh user',
@@ -241,6 +326,10 @@ const en = {
   'vd.planeB': 'management',
   'vd.planeBHint': 'requires SSH credentials',
   'vd.statusBattery': 'status // battery',
+  'vd.alertHint': 'click to alert (via your channel) when this server goes down or recovers',
+  'vd.alertOnHint': 'liveness alert ON — click to edit channels',
+  'vd.alertChannels': 'alert channels for this server',
+  'vd.alertNoChannels': 'no delivery channels yet — add one in Settings → delivery channels',
   'vd.up': 'up',
   'vd.down': 'down',
   'vd.unreachable': 'unreachable — no ping, no open ports',
@@ -328,14 +417,13 @@ const en = {
   'vd.cpus': 'cpus',
   'vd.snapshotHint': '// run a snapshot to fetch CPU / RAM / disk / load over SSH now.',
   'vd.liveMetricsHint': '// live CPU/RAM/disk/load values are in the metrics history above; enable a terminal session here.',
-  'vd.alertChecks': 'alert checks // {n}',
+  'vd.alertChecks': 'service probes // {n}',
 }
 
 const ru = {
   // nav / header
   'nav.fleet': 'флот',
   'nav.domains': 'домены',
-  'nav.alerts': 'оповещения',
   'nav.settings': 'настройки',
   'nav.logout': 'выход',
   'nav.user': 'пользователь:',
@@ -345,6 +433,9 @@ const ru = {
 
   // generic
   'g.save': 'сохранить',
+  'g.off': 'выкл',
+  'g.edit': 'изменить',
+  'g.cancel': 'отмена',
   'g.clear': 'очистить',
   'g.close': '✕ закрыть',
   'g.refresh': '↻ обновить',
@@ -360,8 +451,9 @@ const ru = {
 
   // vm list
   'list.fleet': 'флот // {n}',
-  'list.addVm': '+ ВМ',
+  'list.addVm': '+ сервер',
   'list.up': 'работает — все проверки ок',
+  'list.alertOn': 'алерт по живости вкл',
   'list.warn': 'работает, но мониторинг сервиса упал (янт.)',
   'list.down': 'нет успешных проверок — вероятно недоступен (кр.)',
   'list.unknown': 'не отслеживается — добавьте ping-проверку в мониторинге',
@@ -380,6 +472,14 @@ const ru = {
   'mx.unknown': 'не отслеж.',
   'mx.refresh': '↻ обновить',
   'mx.scanAll': '🛡 скан безопасности',
+  'mx.allVmAlert': 'все серверы',
+  'mx.inAppBell': 'в приложении (колокольчик, всегда)',
+  'mx.noExternalChannel': '// нет telegram/webhook — оповещения пойдут только в приложении.',
+  'mx.configure': 'настроить каналы',
+  'mx.enable': 'включить',
+  'mx.allVmAlertHint': 'включить алерты по живости для ВСЕХ серверов (in-app всегда; telegram/webhook ниже)',
+  'mx.allVmAlertChannels': 'каналы для всех серверов',
+  'mx.allVmAlertApply': '// применяет эти каналы ко всем серверам (массово). отдельных — правь в их колокольчике.',
   'mx.scanAllHint': 'пересканировать экспозиции для всех хостов сейчас (после фикса серверной проблемы — очищает stale-алерты по всему флоту)',
   'mx.scanning': 'сканирование…',
   'mx.empty': 'нет ВМ — добавьте',
@@ -401,15 +501,16 @@ const ru = {
 
   // add vm
   'addvm.name': 'имя',
+  'addvm.host': 'хост (имя или ip)',
   'addvm.hostname': 'хост',
   'addvm.ip': 'ip',
   'addvm.sshPort': 'ssh-порт',
   'addvm.deploying': 'добавление…',
-  'addvm.submit': 'добавить ВМ',
+  'addvm.submit': 'добавить сервер',
 
   // domains
   'dom.title': 'домены // {n}',
-  'dom.add': '+ добавить домен',
+  'dom.addDomain': '+ добавить домен',
   'dom.empty': '// нет доменов — добавьте, чтобы отслеживать DNS, срок сертификата и возраст whois.',
   'dom.probe': 'проверить',
   'dom.info': 'домен // инфо',
@@ -418,8 +519,38 @@ const ru = {
   'dom.noTls': 'нет TLS / порт 443 закрыт',
   'dom.dns': 'dns',
   'dom.noRecords': 'нет записей',
+  'dom.ipInfo': 'ip // инфо',
+  'dom.ipInfoGo': 'узнать geo/ASN',
+  'dom.noIp': 'нет резолвящихся IP',
+  'dom.ports': 'порты // скан',
+  'dom.portsGo': 'скан портов',
+  'dom.noPorts': 'стандартных открытых портов нет',
   'dom.whois': 'whois',
   'dom.confirmDelete': 'Удалить этот домен?',
+  'dom.reminders': 'напоминания',
+  'dom.remindersHint': '// напоминания: уведомить через каналы за столько дней до истечения; повтор каждые N дней — срабатывает повторно, пока событие в окне (0 = один раз). проверка ~раз в 6ч.',
+  'dom.reminderSaved': 'напоминания сохранены ✓',
+  'dom.setReminder': '⏰ напомнить',
+  'dom.days': 'дней до',
+  'dom.repeat': 'повтор каждые (дни, 0=один раз)',
+  'dom.repeatShort': '↻{n}д',
+  'dom.repeatOnce': '1 раз (не повторять)',
+  'dom.repeat3': 'каждые 3 дня',
+  'dom.repeat7': 'еженедельно',
+  'dom.repeat14': 'каждые 2 недели',
+  'dom.repeat30': 'ежемесячно',
+  'dom.add': '+ добавить',
+  'dom.daysRequired': 'сначала введите дни',
+  'dom.inApp': 'в приложении (колокол)',
+  'dom.enableDns': 'алерт при изменении DNS',
+  'dom.dnsAck': 'отметить',
+  'dom.dnsAckOk': 'изменение DNS подтверждено ✓',
+  'dom.change': 'изменение',
+  'dom.noChannelHint': '// нет telegram/webhook — настройте в оповещениях, либо in-app.',
+  'nt.title': 'уведомления',
+  'nt.empty': 'нет уведомлений',
+  'nt.fired': 'сработавшие алерты',
+  'nt.markAll': 'отметить все прочитанными',
 
   // chat
   'chat.ctx': 'контекст: посл. 8 реплик',
@@ -467,6 +598,10 @@ const ru = {
   'set.2faOff': 'выкл',
   'set.2faHint': '// рекомендуется. пока на ВМ хранятся SSH-креды, 2FA нельзя отключить — привилегированный доступ требует усиленного входа.',
   'set.2faIsOn': '2FA включена. При входе требуется код TOTP (или резервный).',
+  'set.2faNeedPw': 'введи пароль аккаунта выше, чтобы подтвердить отключение 2FA.',
+  'set.2faCannotDisable': '🔒 2FA заблокирована во вкл.: хотя бы на одном сервере ещё хранятся SSH-креды.',
+  'set.2faClearThese': 'серверы с сохранёнными кредами',
+  'set.2faClearHint': '// открой каждый, ⚙ редактировать → «очистить» SSH-креды, затем вернись и выключи 2FA.',
   'set.passwordToDisable': 'пароль (для отключения)',
   'set.disable2fa': 'отключить 2FA',
   'set.enable2fa': 'включить 2FA',
@@ -488,6 +623,32 @@ const ru = {
   'al.urlPh': 'url webhook (https://...)',
   'al.secretPh': 'секрет (опц. — подписывает тело HMAC-SHA256)',
   'al.addChannel': '+ добавить канал: {type}',
+  // каналы доставки (Настройки)
+  'ch.title': 'каналы доставки // {n}',
+  'ch.hint': '// куда идут оповещения: telegram (bot_token + chat_id от @BotFather) или webhook.',
+  'ch.webhook': 'вебхук',
+  'ch.namePh': 'имя (необязательно)',
+  'ch.urlPh': 'https://hook.example.com/...',
+  'ch.secretPh': 'hmac-секрет (необязательно)',
+  'ch.add': '+ добавить: {type}',
+  'ch.added': 'канал добавлен',
+  'ch.saved': 'канал сохранён',
+  'ch.editSecretHint': 'токен не заполняй — останется прежний',
+  'ch.test': 'тест',
+  'ch.testOk': '✓ тестовое сообщение доставлено',
+  'ch.testFail': 'доставка не удалась',
+  'ch.confirmDelete': 'удалить этот канал?',
+  'ch.tokenPh': 'bot_token (из BotFather)',
+  'ch.chatPh': 'chat_id',
+  'ch.resolve': 'узнать chat_id',
+  'ch.resolveHint': 'пришли боту любое сообщение, затем нажми — chat_id подхватится сам',
+  'ch.needToken': 'сначала вставь bot_token',
+  'ch.resolved': '✓ chat_id подхвачен',
+  'ch.resolveFail': 'не вышло узнать chat_id',
+  'ch.tgStep1': '1) создай бота в',
+  'ch.tgStep1b': '(/newbot), скопируй токен, вставь выше.',
+  'ch.tgStep2': '2) открой своего бота в Telegram и пришли ему любое сообщение (подойдёт /start).',
+  'ch.tgStep3': '3) нажми «узнать chat_id» — id заполнится сам. затем добавь канал.',
   'al.confirmDeleteChannel': 'Удалить этот канал?',
   'al.rules': 'правила // {n}',
   'al.rulesHint': '// когда уведомлять. Правило срабатывает, когда проверка достигает триггер-статуса; кулдаун защищает от спама. check_type пустой = любая проверка (вкл. всегда активный liveness).',
@@ -521,6 +682,8 @@ const ru = {
   'vd.aiOffState': '(выкл)',
   'vd.aiAccessHint': '// выдать ассистенту доступ на чтение к этой ВМ',
   'vd.sshCreds': 'ssh-креды',
+  'vd.2faRequiredCred': '🔒 для сохранения SSH-кредов нужно сначала включить 2FA.',
+  'vd.2faGoSettings': 'открыть Настройки → 2FA →',
   'vd.credsSet': 'заданы',
   'vd.credsNone': 'нет',
   'vd.sshUserPh': 'ssh-пользователь',
@@ -540,6 +703,10 @@ const ru = {
   'vd.planeB': 'управление',
   'vd.planeBHint': 'нужны SSH-креды',
   'vd.statusBattery': 'статус // батарея',
+  'vd.alertHint': 'клик, чтобы уведомлять (через канал), когда этот сервер падает или поднимается',
+  'vd.alertOnHint': 'алерт по живости ВКЛ — клик, чтобы менять каналы',
+  'vd.alertChannels': 'каналы оповещения для этого сервера',
+  'vd.alertNoChannels': 'нет каналов доставки — добавь в Настройки → каналы доставки',
   'vd.up': 'работает',
   'vd.down': 'недоступен',
   'vd.unreachable': 'недоступен — нет ping, нет открытых портов',
@@ -627,7 +794,7 @@ const ru = {
   'vd.cpus': 'ядра',
   'vd.snapshotHint': '// запустите снапшот, чтобы получить ЦП / ОЗУ / диск / нагрузку по SSH сейчас.',
   'vd.liveMetricsHint': '// текущие ЦП/ОЗУ/диск/нагрузка — в истории метрик выше; здесь можно открыть терминал.',
-  'vd.alertChecks': 'проверки алертов // {n}',
+  'vd.alertChecks': 'доп. проверки // {n}',
 }
 
 const dicts = { en, ru }

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/skibine/vm-pulse/internal/logging"
@@ -38,6 +39,13 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/vms/{id}/vhosts", a.vhostsVM)
 	mux.HandleFunc("GET /api/vms/{id}/siteinfo", a.siteInfoVM)
 	mux.HandleFunc("GET /api/domains/{id}/info", a.domainInfo)
+	mux.HandleFunc("GET /api/domains/{id}/health", a.domainHealth)
+	// Domain intel (Plane A, keyless): per-IP geo/ASN/PTR + a port scan of the resolved address.
+	mux.HandleFunc("GET /api/domains/{id}/ipinfo", a.domainIPInfo)
+	mux.HandleFunc("GET /api/domains/{id}/portscan", a.domainPortScan)
+	// Batch: all domains' fleet health in one response (cache-backed) — avoids N+1 fan-out.
+	mux.HandleFunc("GET /api/domains/health", a.allDomainHealth)
+	mux.HandleFunc("POST /api/domains/{id}/dns-baseline", a.setDnsBaseline)
 	mux.HandleFunc("POST /api/checks/{id}/run", a.runCheckNow)
 }
 
@@ -319,6 +327,287 @@ func (a *crudAPI) domainInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
 	writeJSON(w, http.StatusOK, info)
+}
+
+// domainIPInfo returns geo/ASN/PTR for each resolved A record of the domain (Plane A, keyless). A
+// domain may resolve to several IPs (round-robin / CDN); each is looked up via the keyless ipwho.is
+// endpoint, mirroring the VM "ip // info" panel.
+func (a *crudAPI) domainIPInfo(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	d, err := a.st.GetDomain(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "domainIPInfo", err)
+		return
+	}
+	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
+	ips := append([]string{}, info.DNS.A...)
+	ips = append(ips, info.DNS.AAAA...)
+	out := make([]map[string]any, 0, len(ips))
+	for _, ip := range ips {
+		entry := map[string]any{"ip": ip}
+		if ii, err := monitor.LookupIPInfo(r.Context(), ip); err == nil {
+			entry["info"] = ii
+		}
+		out = append(out, entry)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// domainPortScan scans common TCP ports on the domain's primary resolved IP (Plane A, keyless) —
+// "what does this domain expose to the internet". Reuses the VM port scanner.
+func (a *crudAPI) domainPortScan(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	d, err := a.st.GetDomain(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "domainPortScan", err)
+		return
+	}
+	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
+	host := ""
+	if len(info.DNS.A) > 0 {
+		host = info.DNS.A[0]
+	} else if len(info.DNS.AAAA) > 0 {
+		host = info.DNS.AAAA[0]
+	}
+	if host == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"host": "", "ports": []any{}})
+		return
+	}
+	ports := monitor.PortScan(r.Context(), host, 8*time.Second)
+	writeJSON(w, http.StatusOK, map[string]any{"host": host, "ports": ports})
+}
+
+// region FUNC_DomainHealth [DOMAIN(8): API; CONCEPT(8): Status; TECH(7): monitor]
+// @purpose Aggregate a domain's fleet-visible health from one probe: reachability (resolves to an
+// @purpose IP), registration-expiry (warn <20d, critical <10d), certificate expiry, and DNS-signature
+// @purpose change vs the stored baseline. The baseline is lazily established on the first observation
+// @purpose so a brand-new domain is not immediately flagged as "changed".
+// @complexity 7
+// endregion FUNC_DomainHealth
+type DomainHealth struct {
+	Domain     string   `json:"domain"`
+	Status     string   `json:"status"` // ok | warn | critical
+	Reasons    []string `json:"reasons"`
+	Reachable  bool     `json:"reachable"`
+	DNSSig     string   `json:"dns_signature"`
+	DNSChanged bool     `json:"dns_changed"`
+	OwnerDays  int      `json:"owner_days"`
+	CertDays   int      `json:"cert_days"`
+	CertStatus string   `json:"cert_status"`
+}
+
+// dhEntry is one cached domain-health result (probes are heavy: DNS+TLS+whois/RDAP).
+type dhEntry struct {
+	h  DomainHealth
+	at time.Time
+}
+
+// domainHealthTTL bounds how often a domain is re-probed. Registration expiry / DNS signatures
+// change slowly, so 5 minutes is plenty; the fleet reads from this cache for fast loads.
+const domainHealthTTL = 5 * time.Minute
+
+func (a *crudAPI) domainHealth(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	// Fast path: serve the cached result so fleet loads (and 30s polls from both sidebar + matrix)
+	// never wait on a per-domain probe.
+	a.dhMu.Lock()
+	if e, cached := a.dhCache[id]; cached && time.Since(e.at) < domainHealthTTL {
+		h := e.h
+		a.dhMu.Unlock()
+		writeJSON(w, http.StatusOK, h)
+		return
+	}
+	a.dhMu.Unlock()
+
+	h, err := a.computeDomainHealth(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "domainHealth", err)
+		return
+	}
+	a.dhMu.Lock()
+	a.dhCache[id] = dhEntry{h: h, at: time.Now()}
+	a.dhMu.Unlock()
+	writeJSON(w, http.StatusOK, h)
+}
+
+// allDomainHealth returns every domain's fleet health in one response. It serves the cache for
+// fresh entries and computes (refilling the cache) only for misses, so the fleet matrix + sidebar
+// load all domain dots from a single request instead of N per-domain calls.
+func (a *crudAPI) allDomainHealth(w http.ResponseWriter, r *http.Request) {
+	doms, err := a.st.ListDomains(r.Context())
+	if err != nil {
+		a.writeErr(w, "allDomainHealth", err)
+		return
+	}
+	out := make([]DomainHealth, 0, len(doms))
+	for _, d := range doms {
+		a.dhMu.Lock()
+		e, cached := a.dhCache[d.ID]
+		a.dhMu.Unlock()
+		var h DomainHealth
+		if cached && time.Since(e.at) < domainHealthTTL {
+			h = e.h
+		} else if hh, err := a.computeDomainHealth(r.Context(), d.ID); err == nil {
+			a.dhMu.Lock()
+			a.dhCache[d.ID] = dhEntry{h: hh, at: time.Now()}
+			a.dhMu.Unlock()
+			h = hh
+		} else {
+			continue // a single domain probe failure must not blank the whole batch
+		}
+		out = append(out, h)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// computeDomainHealth probes one domain and aggregates its fleet-visible health.
+func (a *crudAPI) computeDomainHealth(ctx context.Context, id int64) (DomainHealth, error) {
+	d, err := a.st.GetDomain(ctx, id)
+	if err != nil {
+		return DomainHealth{}, err
+	}
+	info, _ := monitor.ProbeDomain(ctx, d.Name)
+
+	// Aggregate the worst status across the signals (critical > warn > ok).
+	status := "ok"
+	var reasons []string
+	rank := map[string]int{"ok": 0, "warn": 1, "critical": 2}
+	promote := func(s string) {
+		if rank[s] > rank[status] {
+			status = s
+		}
+	}
+
+	reachable := len(info.DNS.A) > 0 || len(info.DNS.AAAA) > 0
+	if !reachable {
+		promote("warn")
+		reasons = append(reasons, "unreachable — no dns records")
+	}
+
+	ownerDays := info.Whois.DaysRemaining
+	if ownerDays >= 0 {
+		switch {
+		case ownerDays < 10:
+			promote("critical")
+			reasons = append(reasons, fmt.Sprintf("registration expires in %d days", ownerDays))
+		case ownerDays < 20:
+			promote("warn")
+			reasons = append(reasons, fmt.Sprintf("registration expires in %d days", ownerDays))
+		}
+	}
+
+	certStatus := info.Cert.Status
+	if certStatus == "expired" {
+		promote("critical")
+		reasons = append(reasons, "certificate expired")
+	} else if certStatus == "expiring" {
+		promote("warn")
+		reasons = append(reasons, "certificate expiring soon")
+	}
+
+	// DNS signature: hashed over the STABLE control records only (NS/MX/TXT) — see DNSSignature —
+	// so CDN A/AAAA rotation no longer trips it. A change to nameservers / mail / verification TXT
+	// (the real takeover/reconfiguration signals) yellows the domain. The baseline is lazily set.
+	sig := monitor.DNSSignature(info.DNS)
+	if d.DNSLastSignature == "" {
+		_, _ = a.st.SetDomainDNSSignature(ctx, d.ID, sig)
+	}
+	dnsChanged := d.DNSLastSignature != "" && d.DNSLastSignature != sig
+	if dnsChanged {
+		promote("warn")
+		reasons = append(reasons, "dns control records changed (NS/MX/TXT)")
+	}
+
+	return DomainHealth{
+		Domain: d.Name, Status: status, Reasons: reasons, Reachable: reachable,
+		DNSSig: sig, DNSChanged: dnsChanged, OwnerDays: ownerDays,
+		CertDays: info.Cert.DaysRemaining, CertStatus: certStatus,
+	}, nil
+}
+
+// warmLoop keeps the domain-health cache warm in the background so the fleet reads instant results.
+// Runs immediately, then every domainHealthTTL; stops when ctx is cancelled.
+func (a *crudAPI) warmLoop(ctx context.Context) {
+	logging.LDD(a.logger, 8, "DomHealth", "WARM_START", "background domain-health warmer")
+	a.warmDomains(ctx)
+	t := time.NewTicker(domainHealthTTL)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			a.warmDomains(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (a *crudAPI) warmDomains(ctx context.Context) {
+	doms, err := a.st.ListDomains(ctx)
+	if err != nil {
+		return
+	}
+	// Probe concurrently but BOUNDED: an unbounded fan-out on a large fleet would exhaust FDs and
+	// burst registrar/IANA rate-limits. A small worker pool warms the cache within the TTL with a
+	// capped number of in-flight DNS+TLS+whois probes.
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	for _, d := range doms {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			h, herr := a.computeDomainHealth(ctx, id)
+			if herr != nil {
+				return
+			}
+			a.dhMu.Lock()
+			a.dhCache[id] = dhEntry{h: h, at: time.Now()}
+			a.dhMu.Unlock()
+		}(d.ID)
+	}
+	wg.Wait()
+	logging.LDD(a.logger, 8, "DomHealth", "WARMED", fmt.Sprintf("%d domains (cap=%d)", len(doms), maxConcurrent))
+}
+
+// region FUNC_setDnsBaseline [DOMAIN(8): API; CONCEPT(7): Acknowledge; TECH(6): monitor]
+// @purpose Acknowledge a DNS change: set the current signature as the new baseline so the domain
+// @purpose health clears back to ok until the next real change. This is how a DNS-change warning is
+// @purpose "turned off" after the owner reviews/applies the intended records.
+// @complexity 3
+// endregion FUNC_setDnsBaseline
+func (a *crudAPI) setDnsBaseline(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	d, err := a.st.GetDomain(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "setDnsBaseline", err)
+		return
+	}
+	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
+	sig := monitor.DNSSignature(info.DNS)
+	if _, err := a.st.SetDomainDNSSignature(r.Context(), d.ID, sig); err != nil {
+		a.writeErr(w, "setDnsBaseline", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "dns_signature": sig})
 }
 
 // updatesVM checks for available package updates over SSH (Plane B; read-only apt-get simulate).

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,23 +120,43 @@ func (e *Evaluator) evaluate() {
 		return
 	}
 	fired := 0
+	muted, _ := e.store.MutedVMIDs(e.ctx)
+	// Batch-load all edge-trigger state once per cycle (one query) instead of one GetAlertState per
+	// (rule,check) pair — the hot loop then reads from this map.
+	stateMap, _ := e.store.ListAlertState(e.ctx)
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
-		channels, _ := e.store.ListChannelsForRule(e.ctx, rule.ID)
 		for _, res := range latest {
+			// Scope: a rule with vm_id matches ONLY that VM's checks; nil = all VMs.
+			if rule.VMID != nil && (res.VMID == nil || *rule.VMID != *res.VMID) {
+				continue
+			}
+			// Fleet-wide rules skip muted VMs ("all except this one"). Scoped rules always fire.
+			if rule.VMID == nil && res.VMID != nil && muted[*res.VMID] {
+				continue
+			}
 			if rule.CheckType != "" && rule.CheckType != res.CheckType {
 				continue
 			}
-			if res.Status != rule.TriggerStatus {
+			prev := stateMap[store.AlertStateKey(rule.ID, res.CheckID)]
+			// DOWN: entering the trigger status, or still in it past the cooldown (periodic reminder).
+			if res.Status == rule.TriggerStatus {
+				entering := prev != rule.TriggerStatus
+				if entering || !e.inCooldown(rule.ID, res.CheckID, rule.CooldownSec) {
+					e.fire(rule, res)
+					fired++
+				}
+				_ = e.store.SetAlertState(e.ctx, rule.ID, res.CheckID, rule.TriggerStatus)
 				continue
 			}
-			if e.inCooldown(rule.ID, res.CheckID, rule.CooldownSec) {
-				continue
+			// RECOVERED: a critical-trigger rule whose check returns ok after being critical.
+			if rule.TriggerStatus == "critical" && res.Status == "ok" && prev == "critical" {
+				e.fire(rule, res)
+				fired++
+				_ = e.store.SetAlertState(e.ctx, rule.ID, res.CheckID, "ok")
 			}
-			e.fire(rule, res, channels)
-			fired++
 		}
 	}
 	if fired > 0 {
@@ -160,19 +181,47 @@ func (e *Evaluator) inCooldown(ruleID, checkID int64, cooldownSec int) bool {
 }
 
 // region FUNC_fire [DOMAIN(8): Alerting; CONCEPT(7): Fire; TECH(6): deliver+persist]
-// @purpose Deliver to all attached channels, record delivery_log, persist the alert.
+// @purpose Deliver to the firing SERVER's own channels (per-server routing), record delivery_log,
+// @purpose persist the alert. note is "down"/"recovered" shown in the title.
 // @complexity 5
 // endregion FUNC_fire
-func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult, channels []store.Channel) {
+func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult) {
+	// WHERE the alert goes is the server's own channels (per-server routing), not the rule's.
+	var channels []store.Channel
+	if res.VMID != nil {
+		channels, _ = e.store.ListVMChannels(e.ctx, *res.VMID)
+	}
+	// Localize the message to the operator's UI locale; use the server name as the subject.
+	locale, _ := e.store.GetSetting(e.ctx, "ui_locale")
+	host := rule.Name
+	if res.VMID != nil {
+		if vm, err := e.store.GetVM(e.ctx, *res.VMID); err == nil && vm.Name != "" {
+			host = vm.Name
+		}
+	}
+	// Rule name fallback: older/programmatically-created rules may have an empty name, which would
+	// render the alert footer as "(rule= check=...)". Fall back to a readable label.
+	ruleName := strings.TrimSpace(rule.Name)
+	if ruleName == "" {
+		ruleName = "server down"
+	}
+	title, body := alertText(locale, res.Status, res.CheckType, res.LatencyMS, host)
 	msg := Message{
-		Severity: rule.Severity, RuleName: rule.Name,
+		Severity: rule.Severity, RuleName: ruleName,
 		CheckID: res.CheckID, CheckType: res.CheckType, VMID: res.VMID,
-		Title: fmt.Sprintf("check %s is %s", res.CheckType, res.Status),
-		Body:  fmt.Sprintf("status=%s latency_ms=%.1f", res.Status, res.LatencyMS),
+		Title: title, Body: body,
 	}
 	deliveryLog := map[string]any{}
+	inApp := false // whether this server has the in-app channel attached (optional, user-chosen)
 	for _, ch := range channels {
 		if !ch.Enabled {
+			continue
+		}
+		if ch.Type == "in-app" {
+			// in-app delivery is handled below (needs store access to create a notification); skip the
+			// external delivery path so it isn't reported as "no implementation".
+			inApp = true
+			deliveryLog[fmt.Sprintf("%d", ch.ID)] = map[string]any{"channel": ch.Name, "type": ch.Type, "ok": true}
 			continue
 		}
 		impl, ok := e.reg.Get(ch.Type)
@@ -188,6 +237,15 @@ func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult, chan
 			entry["ok"] = true
 		}
 		deliveryLog[fmt.Sprintf("%d", ch.ID)] = entry
+	}
+	// in-app delivery: only when the operator attached the in-app channel to this server. NOT
+	// unconditional — the user chooses whether alerts also surface in the bell dropdown.
+	if inApp {
+		if _, nerr := e.store.CreateNotification(e.ctx, store.Notification{
+			Title: msg.Title, Body: msg.Body, Kind: "alert", RefID: res.VMID,
+		}); nerr != nil {
+			logging.LDD(e.logger, 8, "fire", "NOTIF_FAIL", nerr.Error())
+		}
 	}
 	alertID, err := e.store.InsertAlert(e.ctx, store.Alert{
 		RuleID: rule.ID, CheckID: res.CheckID, VMID: res.VMID,

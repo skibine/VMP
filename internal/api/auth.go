@@ -165,7 +165,23 @@ func (s *Server) twoFAStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": u.TOTPEnabled})
+	// Whether any VM stores SSH credentials — surfaced so the UI can explain WHY 2FA cannot be
+	// turned off (the cred-gate: disable is refused while privileged secrets remain in the vault).
+	// Include the names of the cred-carrying servers so the operator knows exactly what to clear.
+	type vmRef struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	var credVMs []vmRef
+	if withCreds, err := s.store.VMsWithCreds(r.Context()); err == nil && len(withCreds) > 0 {
+		all, _ := s.store.ListVMs(r.Context(), true)
+		for _, v := range all {
+			if withCreds[v.ID] {
+				credVMs = append(credVMs, vmRef{ID: v.ID, Name: v.Name})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": u.TOTPEnabled, "has_vm_credentials": len(credVMs) > 0, "cred_vms": credVMs})
 }
 
 // region FUNC_twoFASetup [DOMAIN(9): Security; CONCEPT(7): 2FA; TECH(7): net/http,totp]

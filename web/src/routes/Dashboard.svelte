@@ -1,13 +1,14 @@
 <script>
+  import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
-  import { user, logout as doLogout, themeLight, toggleTheme } from '../lib/stores.js'
-  import { t, setLocale, locale } from '../lib/i18n.js'
+  import { user, logout as doLogout, themeLight, toggleTheme, gotoSettings } from '../lib/stores.js'
+  import { t, setLocale, locale, initLocaleFromServer } from '../lib/i18n.js'
   import VmList from '../components/VmList.svelte'
   import VmDetail from '../components/VmDetail.svelte'
   import DomainDetail from '../components/DomainDetail.svelte'
   import FleetMatrix from '../components/FleetMatrix.svelte'
+  import Notifications from '../components/Notifications.svelte'
   import ChatPanel from '../components/ChatPanel.svelte'
-  import Alerts from '../components/Alerts.svelte'
   import Settings from './Settings.svelte'
 
   let view = 'fleet' // 'fleet' | 'alerts' | 'settings'  (domains merged into the fleet)
@@ -44,19 +45,26 @@
     localStorage.setItem('vmp_chat_w', String(chatW))
   }
   function stopDrag() { if (dragging) { dragging = false; localStorage.setItem('vmp_chat_w', String(chatW)) } }
+
+  let gotoUnsub
+  onMount(() => {
+    initLocaleFromServer()
+    gotoUnsub = gotoSettings.subscribe((v) => { if (v) { view = 'settings'; gotoSettings.set(false) } })
+  })
+  onDestroy(() => gotoUnsub && gotoUnsub())
 </script>
 
 <svelte:window on:mousemove={onMove} on:mouseup={stopDrag} />
 
 <div class="h-full flex flex-col overflow-hidden">
-  <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0">
+  <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0 relative z-10">
     <div class="hud-label">// VM&nbsp;PULSE</div>
     <div class="flex items-center gap-1">
       <button class="hud-btn {view === 'fleet' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'fleet')}>{$t('nav.fleet')}</button>
-      <button class="hud-btn {view === 'alerts' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'alerts')}>{$t('nav.alerts')}</button>
       <button class="hud-btn {view === 'settings' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'settings')}>{$t('nav.settings')}</button>
     </div>
     <div class="ml-auto flex items-center gap-4">
+      <Notifications />
       <button class="hud-btn" on:click={() => setLocale($locale === 'ru' ? 'en' : 'ru')} title="switch language">{$t('nav.lang')}</button>
       <button class="hud-btn" on:click={toggleTheme} title="toggle light/dark theme">{$themeLight ? $t('nav.themeDark') : $t('nav.themeLight')}</button>
       <span class="hud-label">{$t('nav.user')}&nbsp;{$user?.username ?? '—'}</span>
@@ -90,15 +98,6 @@
       <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
-    </main>
-  {:else if view === 'alerts'}
-    <main class="flex-1 flex min-h-0 overflow-hidden">
-      <section class="overflow-auto hud-grid min-h-0 flex-1"><Alerts /></section>
-      <div
-        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
-        role="separator" aria-orientation="vertical" on:mousedown={startDrag} title="drag to resize chat"
-      ></div>
-      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px"><ChatPanel /></aside>
     </main>
   {:else}
     <main class="flex-1 flex min-h-0 overflow-hidden">

@@ -6,9 +6,7 @@
   const dispatch = createEventDispatcher()
 
   let name = ''
-  let hostname = ''
-  let ip = ''
-  let port = '22'
+  let host = ''
   let error = ''
   let busy = false
 
@@ -16,11 +14,14 @@
     error = ''
     busy = true
     try {
+      // Only name + host are asked at creation: the host can be a hostname or an IP, and the SSH
+      // port defaults to 22 — it's set in the server's settings once credentials are added.
+      // If the host is already an IP it's also stored as `ip` (the dialer prefers IP over hostname).
       const res = await api.createVm({
         name: name.trim(),
-        hostname: hostname.trim(),
-        ip: ip.trim(),
-        port_ssh: Number(port) || 22
+        hostname: host.trim(),
+        ip: /^\d{1,3}(\.\d{1,3}){3}$/.test(host.trim()) ? host.trim() : '',
+        port_ssh: 22
       })
       // The backend auto-provisions a system liveness check (composite ping/ssh/web/tls) that
       // drives the fleet status dot — no need to create a check here.
@@ -33,31 +34,21 @@
   }
 </script>
 
-<form on:submit|preventDefault={submit} class="space-y-3">
-  <div class="grid grid-cols-2 gap-3">
-    <label class="block space-y-1">
-      <span class="hud-label">{$t('addvm.name')}</span>
-      <input class="hud-input" bind:value={name} placeholder="web-1" />
-    </label>
-    <label class="block space-y-1">
-      <span class="hud-label">{$t('addvm.hostname')}</span>
-      <input class="hud-input" bind:value={hostname} placeholder="host or ip" />
-    </label>
-    <label class="block space-y-1">
-      <span class="hud-label">{$t('addvm.ip')}</span>
-      <input class="hud-input" bind:value={ip} placeholder="10.0.0.1" />
-    </label>
-    <label class="block space-y-1">
-      <span class="hud-label">{$t('addvm.sshPort')}</span>
-      <input class="hud-input font-mono" type="number" bind:value={port} />
-    </label>
-  </div>
+<form on:submit|preventDefault={submit} class="space-y-2">
+  <label class="block space-y-1">
+    <span class="hud-label">{$t('addvm.name')}</span>
+    <input class="hud-input w-full" bind:value={name} placeholder="web-1" />
+  </label>
+  <label class="block space-y-1">
+    <span class="hud-label">{$t('addvm.host')}</span>
+    <input class="hud-input w-full font-mono" bind:value={host} placeholder="example.com or 10.0.0.1" />
+  </label>
   {#if error}
-    <div class="text-xs text-neon-red font-mono border border-neon-red/30 rounded px-3 py-2 bg-neon-red/5">
+    <div class="text-xs text-neon-red font-mono border border-neon-red/30 rounded px-2 py-1.5 bg-neon-red/5">
       {error}
     </div>
   {/if}
-  <button class="hud-btn hud-btn-primary w-full" disabled={busy}>
+  <button class="hud-btn hud-btn-primary w-full !py-1" disabled={busy || !name.trim() || !host.trim()}>
     {busy ? $t('addvm.deploying') : $t('addvm.submit')}
   </button>
 </form>

@@ -69,3 +69,31 @@ func TestOpenAIProvider_Non2xx(t *testing.T) {
 		t.Fatal("expected error on 401")
 	}
 }
+
+// region FUNC_test_MessageContentAlwaysPresent [DOMAIN(7): Testing; CONCEPT(8): Wire; TECH(5): json]
+// @purpose An assistant tool_calls message has empty text content; that must still serialize as
+// @purpose `"content":""` — never omitted (Ollama's OpenAI-compat rejects an absent content as
+// @purpose `invalid message content type: <nil>`). Regression for the tool-calling 400.
+// @complexity 3
+// endregion FUNC_test_MessageContentAlwaysPresent
+func TestMessageContentAlwaysPresent(t *testing.T) {
+	msg := Message{Role: "assistant", ToolCalls: []ToolCall{
+		{ID: "call_1", Type: "function", Function: FunctionCall{Name: "list_vms", Arguments: "{}"}},
+	}}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	content, ok := m["content"]
+	if !ok {
+		t.Fatalf("assistant tool_calls message must include content, got: %s", raw)
+	}
+	if _, isStr := content.(string); !isStr {
+		t.Errorf("content must be a string, got %T (%s)", content, raw)
+	}
+	t.Logf("[IMP:8][TestMsgContent][RESULT] content present as string: %s", raw)
+}

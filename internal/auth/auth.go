@@ -156,6 +156,13 @@ func FromContext(ctx context.Context) (int64, bool) {
 	return v, ok
 }
 
+// WithUser injects the authenticated userID into a context (the inverse of FromContext). Primarily a
+// test helper so handlers can be exercised with an authenticated request without spinning up the
+// session middleware.
+func WithUser(ctx context.Context, uid int64) context.Context {
+	return context.WithValue(ctx, ctxKey{}, uid)
+}
+
 // isPublic: anything outside /api/ (frontend assets, /healthz) is public; only the login endpoints
 // under /api/ are public (POST /api/auth/login and the 2FA-completion POST /api/auth/login/2fa).
 // All other /api/* routes require a valid session.

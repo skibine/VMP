@@ -20,10 +20,13 @@ package monitor
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -68,6 +71,7 @@ type WhoisInfo struct {
 // expiryDateLayouts are the common registrar date formats (tried in order). Whois responses vary
 // wildly across TLDs; this covers the dominant ones (.com/.net Verisign, .ru/.de numeric, ISO, etc.).
 var expiryDateLayouts = []string{
+	time.RFC3339Nano,
 	time.RFC3339,
 	"2006-01-02T15:04:05Z",
 	"2006-01-02 15:04:05",
@@ -206,9 +210,12 @@ func certInfo(ctx context.Context, domain string) (CertInfo, error) {
 	}, nil
 }
 
-// region FUNC_whoisLookup [DOMAIN(7): Observability; CONCEPT(7): Whois; TECH(7): net]
-// @purpose 2-hop whois: query IANA, follow the referral, parse registrar/created/expiry.
-// @complexity 6
+// region FUNC_whoisLookup [DOMAIN(7): Observability; CONCEPT(7): Whois; TECH(7): net,rdap]
+// @purpose Resolve a domain's registrar/created/expiry. First the classic 2-hop whois (IANA referral
+// @purpose -> authoritative server); if that yields no expiry (many zones are RDAP-only now, e.g.
+// @purpose Identity Digital's .pro with an empty IANA `refer:`), fall back to RDAP. Absent expiry is
+// @purpose reported as DaysRemaining=-1 (unknown), never as 0.
+// @complexity 7
 // endregion FUNC_whoisLookup
 func whoisLookup(ctx context.Context, domain string) (WhoisInfo, error) {
 	ref, err := whoisQuery(ctx, domain, "whois.iana.org:43")
@@ -222,7 +229,22 @@ func whoisLookup(ctx context.Context, domain string) (WhoisInfo, error) {
 			body = b
 		}
 	}
-	return parseWhoisFields(body), nil
+	wi := parseWhoisFields(body)
+	// Classic whois gave no expiry (RDAP-only zone, empty referral, etc.): try RDAP to get the real
+	// registration expiry instead of treating the domain as already expired.
+	if wi.Expiry == "" {
+		if rw, rerr := rdapLookup(ctx, domain); rerr == nil && rw.Expiry != "" {
+			if wi.Registrar == "" {
+				wi.Registrar = rw.Registrar
+			}
+			if wi.Created == "" {
+				wi.Created = rw.Created
+			}
+			wi.Expiry = rw.Expiry
+			wi.DaysRemaining = rw.DaysRemaining
+		}
+	}
+	return wi, nil
 }
 
 // whoisQuery opens a TCP whois connection, sends the query, returns the raw text (bounded).
@@ -250,6 +272,27 @@ func whoisQuery(ctx context.Context, query, addr string) (string, error) {
 
 var reRefer = regexp.MustCompile(`(?im)^\s*refer:\s*(\S+)`)
 
+// region FUNC_DNSSignature [DOMAIN(8): Observability; CONCEPT(7): DNSChange; TECH(6): crypto/sha256]
+// @purpose Produce a short stable hash of a domain's DNS record set so callers (the reminder
+// @purpose evaluator and the domain-health endpoint) can detect changes. Order within each set is
+// @purpose normalized before hashing, so reordering a record is not treated as a change.
+// @purpose Only the control/delegation records (NS/MX/TXT) are hashed: A/AAAA are excluded because
+// @purpose CDN front-ends rotate them constantly, which caused false "DNS changed" yellows. A real
+// @purpose takeover changes NS (nameservers) or MX/TXT (mail/verification), so hijacks are still caught.
+// @complexity 3
+// endregion FUNC_DNSSignature
+func DNSSignature(d DNSRecords) string {
+	// Sort each set so the hash is order-stable: DNS servers return records in arbitrary order between
+	// lookups, and reordering a record must NOT look like a change. A/AAAA are intentionally omitted
+	// (CDN rotation noise); NS/MX/TXT are the security-relevant delegation/control records.
+	sort := func(s []string) []string { out := append([]string(nil), s...); slices.Sort(out); return out }
+	h := sha256.New()
+	fmt.Fprintln(h, strings.Join(sort(d.MX), ","))
+	fmt.Fprintln(h, strings.Join(sort(d.NS), ","))
+	fmt.Fprintln(h, strings.Join(sort(d.TXT), ","))
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 // parseRefer extracts the authoritative whois server from an IANA referral response.
 func parseRefer(body string) string {
 	if m := reRefer.FindStringSubmatch(body); len(m) == 2 {
@@ -265,8 +308,11 @@ var (
 )
 
 // parseWhoisFields extracts registrar/created/expiry from a whois body (tolerant across TLDs).
+// BUG_FIX_CONTEXT: DaysRemaining defaults to -1 ("unknown"), NOT 0. The int zero-value read as
+// "expires in 0 days = expired" whenever a zone omitted the expiry field, falsely flagging domains
+// (e.g. RDAP-only .pro) as expired. Unknown expiry must never look like "already expired".
 func parseWhoisFields(body string) WhoisInfo {
-	wi := WhoisInfo{Status: "ok"}
+	wi := WhoisInfo{Status: "ok", DaysRemaining: -1}
 	if m := reRegistrar.FindStringSubmatch(body); len(m) == 3 {
 		wi.Registrar = strings.TrimSpace(m[2])
 	}
@@ -275,6 +321,15 @@ func parseWhoisFields(body string) WhoisInfo {
 	}
 	if m := reExpiry.FindStringSubmatch(body); len(m) == 3 {
 		wi.Expiry = strings.TrimSpace(m[2])
+		// Normalize to a bare date (2006-01-02) and compute days-until-expiry so the UI can render
+		// "2026-08-22 (123d)" exactly like the certificate block. -1 when the registrar format is
+		// unparseable (rare TLDs) — treated as "unknown expiry", not expired.
+		if t, ok := parseExpiryDate(wi.Expiry); ok {
+			wi.DaysRemaining = int(time.Until(t).Hours() / 24)
+			wi.Expiry = t.UTC().Format("2006-01-02")
+		} else {
+			wi.DaysRemaining = -1
+		}
 	}
 	if wi.Registrar == "" && wi.Created == "" && wi.Expiry == "" {
 		wi.Status = "error"

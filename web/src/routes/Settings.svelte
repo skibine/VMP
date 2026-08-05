@@ -148,7 +148,82 @@
     if (p) applyPreset(p)
   }
 
+  // ── Delivery channels (Telegram / webhook) ──
+  let channels = []
+  let nc = { type: 'telegram', name: '', bot_token: '', chat_id: '', url: '', secret: '' }
+  let chBusy = false
+  let chResolving = false
+  let chMsg = ''
+  let chOk = false
+  async function loadChannels() {
+    try { channels = (await api.listChannels()) || [] } catch (_) {}
+  }
+  async function addChannel() {
+    chMsg = ''; chOk = false
+    let payload
+    if (nc.type === 'telegram') {
+      if (!nc.bot_token || !nc.chat_id) { chMsg = 'bot_token and chat_id required'; return }
+      payload = { type: 'telegram', name: nc.name || 'telegram', enabled: true, config: { bot_token: nc.bot_token, chat_id: nc.chat_id } }
+    } else {
+      if (!nc.url) { chMsg = 'webhook url required'; return }
+      const config = { url: nc.url }; if (nc.secret) config.secret = nc.secret
+      payload = { type: 'webhook', name: nc.name || 'webhook', enabled: true, config }
+    }
+    chBusy = true
+    try {
+      await api.createChannel(payload)
+      nc = { type: nc.type, name: '', bot_token: '', chat_id: '', url: '', secret: '' }
+      await loadChannels()
+      chMsg = $t('ch.added'); chOk = true
+    } catch (e) { chMsg = e.message } finally { chBusy = false }
+  }
+  // Auto-capture chat_id: the operator pastes their bot token, sends any message to their bot, then
+  // clicks this — VM Pulse calls getUpdates once and fills the chat_id automatically.
+  async function resolveChat() {
+    chMsg = ''; chOk = false
+    if (!nc.bot_token) { chMsg = $t('ch.needToken'); return }
+    chResolving = true
+    try {
+      const res = await api.resolveTelegramChatId(nc.bot_token)
+      if (res.ok && res.chat_id) { nc.chat_id = String(res.chat_id); chMsg = $t('ch.resolved'); chOk = true }
+      else { chMsg = $t('ch.resolveFail') + (res.error ? ': ' + res.error : '') }
+    } catch (e) { chMsg = e.message } finally { chResolving = false }
+  }
+  async function testChannel(id) {
+    chMsg = ''; chOk = false; chBusy = true
+    try {
+      const res = await api.testChannel(id)
+      chMsg = res.ok ? $t('ch.testOk') : ($t('ch.testFail') + (res.error ? ': ' + res.error : ''))
+      chOk = !!res.ok
+    } catch (e) { chMsg = e.message } finally { chBusy = false }
+  }
+  async function removeChannel(id) {
+    if (!confirm($t('ch.confirmDelete'))) return
+    try { await api.deleteChannel(id); await loadChannels() } catch (e) { chMsg = e.message }
+  }
+  // Inline edit (rename / fix chat_id without re-pasting the token — secrets are preserved when blank).
+  let editing = null // channel id being edited, or null
+  let ec = { name: '', chat_id: '', url: '' }
+  function startEdit(c) {
+    editing = c.id
+    ec = { name: c.name || '', chat_id: c.config?.chat_id || '', url: c.config?.url || '' }
+    chMsg = ''; chOk = false
+  }
+  async function saveEdit(c) {
+    chBusy = true; chMsg = ''
+    try {
+      const config = {}
+      if (c.type === 'telegram') config.chat_id = ec.chat_id
+      else config.url = ec.url
+      await api.updateChannel(c.id, { name: ec.name || c.name, config })
+      editing = null
+      await loadChannels()
+      chMsg = $t('ch.saved'); chOk = true
+    } catch (e) { chMsg = e.message } finally { chBusy = false }
+  }
+
   onMount(loadAI)
+  onMount(loadChannels)
 
   // ── 2FA ──
   let twofa = { enabled: false, loaded: false }
@@ -183,7 +258,8 @@
   }
 
   async function disable() {
-    twofaErr = ''
+    twofaErr = ''; twofaMsg = ''
+    if (!disablePw) { twofaErr = $t('set.2faNeedPw'); return }
     twofaBusy = true
     try {
       await api.twoFADisable(disablePw)
@@ -290,6 +366,65 @@
   </section>
 
   <section class="hud-panel p-5 space-y-3">
+    <div class="hud-label text-neon-cyan">{$t('ch.title', { n: channels.length })}</div>
+    <p class="text-xs text-hud-dim">{$t('ch.hint')}</p>
+
+    {#if channels.length}
+      <div class="space-y-1">
+        {#each channels as c (c.id)}
+          {#if editing === c.id}
+            <div class="border border-neon-green/40 rounded px-2 py-1.5 text-xs font-mono space-y-1 bg-neon-green/5">
+              <input class="hud-input" placeholder={$t('ch.namePh')} bind:value={ec.name} />
+              {#if c.type === 'telegram'}<input class="hud-input" placeholder="chat_id" bind:value={ec.chat_id} />{:else}<input class="hud-input" placeholder={$t('ch.urlPh')} bind:value={ec.url} />{/if}
+              <div class="flex items-center gap-1">
+                <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px]" on:click={() => saveEdit(c)} disabled={chBusy}>{$t('g.save')}</button>
+                <button class="hud-btn !py-0.5 !text-[10px]" on:click={() => (editing = null)}>{$t('g.cancel')}</button>
+                <span class="text-[10px] text-hud-dim">{$t('ch.editSecretHint')}</span>
+              </div>
+            </div>
+          {:else}
+            <div class="flex items-center gap-2 border border-hud-line rounded px-2 py-1.5 text-xs font-mono">
+              <span class="text-neon-cyan uppercase w-20">{c.type}</span>
+              <span class="text-emerald-100 flex-1 truncate">{c.name}</span>
+              <span class="text-hud-dim truncate max-w-[35%]">{c.config?.chat_id || c.config?.url || (c.config?.has_token ? '✓ token' : '')}</span>
+              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => testChannel(c.id)} disabled={chBusy}>✉ {$t('ch.test')}</button>
+              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => startEdit(c)} title={$t('g.edit')}>✎</button>
+              <button class="hud-btn !py-0.5 !px-2 !text-neon-red border-neon-red/40" on:click={() => removeChannel(c.id)} title={$t('g.delete')}>✕</button>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+
+    <form on:submit|preventDefault={addChannel} class="grid grid-cols-2 gap-2">
+      <select class="hud-input col-span-2" bind:value={nc.type}>
+        <option value="telegram">telegram</option>
+        <option value="webhook">{$t('ch.webhook')}</option>
+      </select>
+      <input class="hud-input col-span-2" placeholder={$t('ch.namePh')} bind:value={nc.name} />
+      {#if nc.type === 'telegram'}
+        <input class="hud-input col-span-2" placeholder={$t('ch.tokenPh')} bind:value={nc.bot_token} />
+        <div class="col-span-2 flex items-center gap-2">
+          <input class="hud-input flex-1" placeholder={$t('ch.chatPh')} bind:value={nc.chat_id} />
+          <button type="button" class="hud-btn !text-[10px] !px-2 whitespace-nowrap" on:click={resolveChat} disabled={chResolving} title={$t('ch.resolveHint')}>{chResolving ? '…' : $t('ch.resolve')}</button>
+        </div>
+      {:else}
+        <input class="hud-input col-span-2" placeholder={$t('ch.urlPh')} bind:value={nc.url} />
+        <input class="hud-input col-span-2" placeholder={$t('ch.secretPh')} bind:value={nc.secret} />
+      {/if}
+      <button class="hud-btn hud-btn-primary col-span-2" disabled={chBusy}>{chBusy ? '…' : $t('ch.add', { type: nc.type })}</button>
+    </form>
+    {#if nc.type === 'telegram'}
+      <div class="text-[11px] text-hud-dim space-y-1">
+        <div>{$t('ch.tgStep1')} <a class="text-neon-cyan underline" href="https://t.me/BotFather?start=newbot" target="_blank" rel="noopener">BotFather →</a> {$t('ch.tgStep1b')}</div>
+        <div>{$t('ch.tgStep2')}</div>
+        <div>{$t('ch.tgStep3')}</div>
+      </div>
+    {/if}
+    {#if chMsg}<div class="text-xs font-mono {chOk ? 'text-neon-green' : 'text-neon-red'}">{chMsg}</div>{/if}
+  </section>
+
+  <section class="hud-panel p-5 space-y-3">
     <div class="flex items-center gap-2">
       <div class="hud-label text-neon-cyan">{$t('set.2faTitle')}</div>
       {#if twofa.loaded}
@@ -301,11 +436,25 @@
     {#if twofa.enabled}
       <div class="space-y-2">
         <p class="text-xs text-neon-green font-mono">{$t('set.2faIsOn')}</p>
+        {#if twofa.has_vm_credentials}
+          <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5 space-y-1">
+            <div>{$t('set.2faCannotDisable')}</div>
+            {#if twofa.cred_vms && twofa.cred_vms.length}
+              <div class="text-hud-dim">{$t('set.2faClearThese')}:</div>
+              <div class="flex flex-wrap gap-1">
+                {#each twofa.cred_vms as v (v.id)}
+                  <span class="inline-flex items-center gap-1 border border-neon-amber/40 rounded px-1.5 py-0.5 text-neon-amber">🔒 {v.name}</span>
+                {/each}
+              </div>
+              <div class="text-hud-dim">{$t('set.2faClearHint')}</div>
+            {/if}
+          </div>
+        {/if}
         <label class="block space-y-1">
           <span class="hud-label">{$t('set.passwordToDisable')}</span>
           <input class="hud-input" type="password" bind:value={disablePw} placeholder="••••••" />
         </label>
-        <button class="hud-btn !text-neon-red border-neon-red/40" on:click={disable} disabled={twofaBusy || !disablePw}>{twofaBusy ? '…' : $t('set.disable2fa')}</button>
+        <button class="hud-btn !text-neon-red border-neon-red/40" on:click={disable} disabled={twofaBusy || twofa.has_vm_credentials}>{twofaBusy ? '…' : $t('set.disable2fa')}</button>
       </div>
     {:else if !setup}
       <button class="hud-btn hud-btn-primary" on:click={startSetup} disabled={twofaBusy}>{twofaBusy ? '…' : $t('set.enable2fa')}</button>

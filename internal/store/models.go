@@ -65,6 +65,9 @@ type VM struct {
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
 	ArchivedAt        *string  `json:"archived_at"`
+	// HasCreds is NOT a stored column — it is computed at list time (vm_credentials row exists) so the
+	// UI can show the lock badge without an extra per-VM request.
+	HasCreds bool `json:"has_creds"`
 }
 
 // region FUNC_VM_Validate [DOMAIN(7): Validation; CONCEPT(7): Rules; TECH(4): pure]
@@ -144,7 +147,41 @@ type Domain struct {
 	MonitorDNS     bool   `json:"monitor_dns"`
 	MonitorWhois   bool   `json:"monitor_whois"`
 	MonitorTLS     bool   `json:"monitor_tls"`
+	CertNotifyDays  int    `json:"cert_notify_days"`
+	OwnerNotifyDays int    `json:"owner_notify_days"`
+	CertLastNotified  string `json:"cert_last_notified_at"`
+	OwnerLastNotified string `json:"owner_last_notified_at"`
+	CertNotifyChannelID  int    `json:"cert_notify_channel_id"`
+	OwnerNotifyChannelID int    `json:"owner_notify_channel_id"`
+	DNSNotifyEnabled     bool   `json:"dns_notify_enabled"`
+	DNSNotifyChannelID   int    `json:"dns_notify_channel_id"`
+	DNSLastSignature     string `json:"dns_last_signature"`
+	DNSLastNotified      string `json:"dns_last_notified_at"`
 	CreatedAt      string `json:"created_at"`
+}
+
+// Notification is one in-app notification row (reminder delivery channel "in-app").
+type Notification struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Kind      string `json:"kind"`
+	RefID     *int64 `json:"ref_id"`
+	CreatedAt string `json:"created_at"`
+	ReadAt    string `json:"read_at"`
+}
+
+// DomainReminder is one expiry/change reminder attached to a domain. A domain may have several
+// per kind (e.g. cert at 30d and at 7d). repeat_days>0 re-fires while triggered.
+type DomainReminder struct {
+	ID            int64  `json:"id"`
+	DomainID      int64  `json:"domain_id"`
+	Kind          string `json:"kind"`           // cert | owner | dns
+	Days          int    `json:"days"`           // threshold (0 for dns)
+	ChannelID     int    `json:"channel_id"`     // 0 = in-app only
+	RepeatDays    int    `json:"repeat_days"`    // 0 = once; >0 = re-notify interval
+	LastNotified  string `json:"last_notified_at"`
+	CreatedAt     string `json:"created_at"`
 }
 
 // region FUNC_Domain_Validate [DOMAIN(7): Validation; CONCEPT(6): Rules; TECH(3): pure]

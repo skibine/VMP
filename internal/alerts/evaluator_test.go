@@ -53,12 +53,12 @@ func TestEvaluator_FiresAndCooldowns(t *testing.T) {
 	_, _ = s.InsertCheckResult(ctx, chkID, "critical", 0, "refused", nil)
 
 	// Rule: any check type, trigger critical, big cooldown.
-	rid, _ := s.CreateAlertRule(ctx, store.AlertRule{
+	_, _ = s.CreateAlertRule(ctx, store.AlertRule{
 		Name: "down", TriggerStatus: "critical", Severity: "critical", CooldownSec: 3600, Enabled: true,
 	})
 	// Channel of type "capture" attached.
 	cid, _ := s.CreateChannel(ctx, store.Channel{Type: "capture", Name: "cap", Enabled: true})
-	_ = s.AttachChannel(ctx, rid, cid)
+	_ = s.SetVMChannels(ctx, vmID, []int64{cid})
 
 	cap := &captureChannel{}
 	reg := NewRegistry(cap)
@@ -102,4 +102,64 @@ func TestEvaluator_FiresAndCooldowns(t *testing.T) {
 	if !saw {
 		t.Error("Anti-Illusion: missing [IMP:9][fire][FIRED] in logs")
 	}
+}
+
+// region FUNC_test_Evaluator_VMScopeAndRecovery [DOMAIN(7): Testing; CONCEPT(8): Scope; TECH(7): evaluator]
+// @purpose A rule with vm_id fires ONLY for that VM; firing is edge-triggered (down once, not
+// @purpose every cycle) and a "recovered" message fires when the check returns to ok.
+// @complexity 5
+// endregion FUNC_test_Evaluator_VMScopeAndRecovery
+func TestEvaluator_VMScopeAndRecovery(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.Setup(slog.LevelDebug, &buf)
+	s, err := store.Open(filepath.Join(t.TempDir(), "scope.sqlite"), logger)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+
+	va, _ := s.CreateVM(ctx, store.VM{Name: "A", Hostname: "a", IP: "127.0.0.1", PortSSH: 22})
+	vb, _ := s.CreateVM(ctx, store.VM{Name: "B", Hostname: "b", IP: "127.0.0.2", PortSSH: 22})
+	chkA, _ := s.CreateCheck(ctx, store.Check{VMID: &va, TargetType: "vm", CheckType: "tcp", IntervalSec: 60, Enabled: true})
+	chkB, _ := s.CreateCheck(ctx, store.Check{VMID: &vb, TargetType: "vm", CheckType: "tcp", IntervalSec: 60, Enabled: true})
+
+	// Rule scoped to VM A only.
+	_, _ = s.CreateAlertRule(ctx, store.AlertRule{
+		Name: "A-down", CheckType: "tcp", TriggerStatus: "critical", Severity: "critical",
+		CooldownSec: 3600, Enabled: true, VMID: &va,
+	})
+	cid, _ := s.CreateChannel(ctx, store.Channel{Type: "capture", Name: "cap", Enabled: true})
+	_ = s.SetVMChannels(ctx, va, []int64{cid})
+
+	cap := &captureChannel{}
+	reg := NewRegistry(cap)
+	ev := New(s, reg, logger, 1)
+	ev.ctx = context.Background()
+
+	// Both checks critical — only VM A (scoped) must fire.
+	_, _ = s.InsertCheckResult(ctx, chkA, "critical", 0, "down", nil)
+	_, _ = s.InsertCheckResult(ctx, chkB, "critical", 0, "down", nil)
+	ev.evaluate()
+	if cap.count() != 1 {
+		t.Fatalf("scope: want 1 delivery (VM A only), got %d", cap.count())
+	}
+	// Still critical next cycle — no re-fire (edge + cooldown).
+	ev.evaluate()
+	if cap.count() != 1 {
+		t.Fatalf("edge: want still 1 (no re-fire), got %d", cap.count())
+	}
+	// VM A recovers — a RECOVERED message fires.
+	_, _ = s.InsertCheckResult(ctx, chkA, "ok", 1, "up", nil)
+	ev.evaluate()
+	if cap.count() != 2 {
+		t.Fatalf("recovery: want 2 deliveries, got %d", cap.count())
+	}
+	cap.mu.Lock()
+	last := cap.msgs[len(cap.msgs)-1].Title
+	cap.mu.Unlock()
+	if !strings.Contains(last, "RECOVERED") {
+		t.Errorf("recovery msg should mention RECOVERED, got %q", last)
+	}
+	t.Logf("[IMP:8][TestScope][RESULT] deliveries=%d lastTitle=%q", cap.count(), last)
 }

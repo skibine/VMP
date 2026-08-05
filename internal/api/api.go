@@ -44,6 +44,7 @@ type Server struct {
 	mux        *http.ServeMux
 	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
+	crud       *crudAPI           // owns the domain-health cache + warmer loop
 }
 
 // WithAgent attaches an AI agent (enables POST /api/ai/chat).
@@ -78,7 +79,7 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/auth/2fa/disable", srv.twoFADisable)
 	mux.HandleFunc("PUT /api/auth/password", srv.changePassword)
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
-	RegisterCRUD(mux, s, logger)                    // TODO(auth): wrap CRUD routes with Plane B session middleware
+	srv.crud = RegisterCRUD(mux, s, logger)          // TODO(auth): wrap CRUD routes with Plane B session middleware
 	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset
 	registerMetrics(mux, s, logger)                 // Plane A: metrics series + pull-poller toggle
 	registerSPA(mux)                                // catch-all "/" serves the embedded frontend
@@ -133,6 +134,11 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 		errCh <- nil
 	}()
+	// Background domain-health warmer: keeps the fleet lamps warm in-memory so a fleet load never
+	// blocks on a per-domain probe (DNS+TLS+whois/RDAP is seconds each). Stops with ctx.
+	if s.crud != nil {
+		go s.crud.warmLoop(ctx)
+	}
 	select {
 	case err := <-errCh:
 		return err

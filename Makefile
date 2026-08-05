@@ -7,7 +7,15 @@ PKG := ./...
 BIN := vmpulse
 WEB := web
 
-.PHONY: all build web vet test run tidy clean test-loop web-dev
+# Hardening flags for the release binaries. Stripping symbols/debug, trimming absolute build
+# paths, not embedding VCS status and removing the Go buildid all shrink the surface that AV
+# heuristics (e.g. Windows Defender "Trojan:Win32/Bearfoos.Alml") use to flag unsigned Go
+# binaries with network + command-execution features. Signing is still required for clean
+# distribution, but these flags reduce false-positive detections significantly.
+LDFLAGS := -s -w -buildid=
+BUILDFLAGS := -trimpath -buildvcs=false
+
+.PHONY: all build web vet test run tidy clean test-loop web-dev build-windows
 
 all: vet test build
 
@@ -19,7 +27,12 @@ web-dev:
 	cd $(WEB) && npm run dev
 
 build: web
-	$(GO) build -o $(BIN) ./cmd/vmpulse
+	$(GO) build $(BUILDFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/vmpulse
+
+# Cross-compile a hardened Windows amd64 binary (pure-Go deps, no CGO) into dist/.
+build-windows: web
+	mkdir -p dist
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) -ldflags '$(LDFLAGS)' -o dist/vmpulse-windows-amd64.exe ./cmd/vmpulse
 
 vet:
 	$(GO) vet $(PKG)
@@ -39,4 +52,4 @@ tidy:
 
 clean:
 	rm -f $(BIN) coverage.out
-	rm -rf data/ logs/
+	rm -rf dist/ data/ logs/

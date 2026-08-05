@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/ssh"
@@ -35,14 +36,21 @@ type crudAPI struct {
 	st     *store.Store
 	dialer *ssh.Dialer
 	logger *slog.Logger
+
+	// Domain-health cache: probes are expensive (DNS+TLS+whois/RDAP), so the fleet must read a
+	// warm cache rather than probing every domain on every load / 30s poll. Populated lazily by
+	// the handlers and on a background warmer loop.
+	dhMu    sync.Mutex
+	dhCache map[int64]dhEntry
 }
 
 // region FUNC_RegisterCRUD [DOMAIN(7): API; CONCEPT(7): Wiring; TECH(8): go1.22routing]
-// @purpose Attach all CRUD routes to the mux (Go 1.22 method+path patterns).
+// @purpose Attach all CRUD routes to the mux (Go 1.22 method+path patterns) and return the crudAPI
+// @purpose so the Server can drive the domain-health warmer loop.
 // @complexity 3
 // endregion FUNC_RegisterCRUD
-func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
-	a := &crudAPI{st: st, dialer: ssh.New(st, logger), logger: logger}
+func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) *crudAPI {
+	a := &crudAPI{st: st, dialer: ssh.New(st, logger), logger: logger, dhCache: map[int64]dhEntry{}}
 
 	// VMs (with soft-delete archive endpoint).
 	mux.HandleFunc("GET /api/vms", a.listVMs)
@@ -75,11 +83,14 @@ func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) {
 
 	// Settings: AI provider config + VM credentials.
 	registerSettings(mux, a)
+	registerNotifications(mux, a)
+	registerDomainReminders(mux, a)
 
 	// On-demand diagnostics + run-now.
 	registerDiagnostics(mux, a)
 	// AI action approval (Plane B; execute approved proposals over SSH).
 	registerAIActions(mux, a)
+	return a
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────────
@@ -134,6 +145,13 @@ func (a *crudAPI) listVMs(w http.ResponseWriter, r *http.Request) {
 	}
 	if vms == nil {
 		vms = []store.VM{}
+	}
+	// Decorate each VM with has_creds (one batch query) so the UI can render the lock badge and tell
+	// the operator which servers block 2FA disable.
+	if withCreds, err := a.st.VMsWithCreds(r.Context()); err == nil {
+		for i := range vms {
+			vms[i].HasCreds = withCreds[vms[i].ID]
+		}
 	}
 	writeJSON(w, http.StatusOK, vms)
 }

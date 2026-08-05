@@ -34,6 +34,7 @@ type AlertRule struct {
 	Severity      string `json:"severity"`       // warning | critical
 	CooldownSec   int    `json:"cooldown_sec"`
 	Enabled       bool   `json:"enabled"`
+	VMID          *int64 `json:"vm_id,omitempty"` // scope: nil = all VMs, set = only that VM
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -118,9 +119,9 @@ func (s *Store) CreateAlertRule(ctx context.Context, r AlertRule) (int64, error)
 		ctype = strings.TrimSpace(ctype)
 	}
 	res, err := s.DB.ExecContext(ctx, `
-INSERT INTO alert_rules (name, check_type, trigger_status, severity, cooldown_sec, enabled)
-VALUES (?,?,?,?,?,?)`,
-		r.Name, ctype, r.TriggerStatus, r.Severity, r.CooldownSec, toBoolInt(r.Enabled))
+INSERT INTO alert_rules (name, check_type, trigger_status, severity, cooldown_sec, enabled, vm_id)
+VALUES (?,?,?,?,?,?,?)`,
+		r.Name, ctype, r.TriggerStatus, r.Severity, r.CooldownSec, toBoolInt(r.Enabled), nullInt64(r.VMID))
 	if err != nil {
 		logging.LDD(s.logger, 10, "CreateAlertRule", "INSERT_FAIL", err.Error())
 		return 0, fmt.Errorf("CreateAlertRule: %w", err)
@@ -132,7 +133,7 @@ VALUES (?,?,?,?,?,?)`,
 
 func (s *Store) ListAlertRules(ctx context.Context) ([]AlertRule, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT id, COALESCE(check_type,''), trigger_status, severity, cooldown_sec, enabled, created_at
+SELECT id, COALESCE(check_type,''), trigger_status, severity, cooldown_sec, enabled, created_at, vm_id
 FROM alert_rules ORDER BY id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("ListAlertRules: %w", err)
@@ -142,10 +143,12 @@ FROM alert_rules ORDER BY id ASC`)
 	for rows.Next() {
 		var r AlertRule
 		var enabled int
-		if err := rows.Scan(&r.ID, &r.CheckType, &r.TriggerStatus, &r.Severity, &r.CooldownSec, &enabled, &r.CreatedAt); err != nil {
+		var vmID sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.CheckType, &r.TriggerStatus, &r.Severity, &r.CooldownSec, &enabled, &r.CreatedAt, &vmID); err != nil {
 			return nil, fmt.Errorf("ListAlertRules scan: %w", err)
 		}
 		r.Enabled = enabled != 0
+		r.VMID = toInt64Ptr(vmID)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -215,6 +218,16 @@ func (s *Store) GetChannel(ctx context.Context, id int64) (Channel, error) {
 	c.Config = map[string]any{}
 	unmarshalJSONcol(s.decCol(config), &c.Config)
 	return c, nil
+}
+
+// UpdateChannel updates a channel's mutable fields (type/name/config/enabled) by id.
+func (s *Store) UpdateChannel(ctx context.Context, c Channel) error {
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE channels SET type=?, name=?, config=?, enabled=? WHERE id=?`,
+		c.Type, c.Name, s.encCol(marshalJSONcol(c.Config)), toBoolInt(c.Enabled), c.ID); err != nil {
+		return fmt.Errorf("UpdateChannel: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) DeleteChannel(ctx context.Context, id int64) error {
@@ -320,6 +333,169 @@ func (s *Store) LastAlertFor(ctx context.Context, ruleID, checkID int64) (string
 		return "", false, fmt.Errorf("LastAlertFor: %w", err)
 	}
 	return ts, true, nil
+}
+
+// SetAlertRuleEnabled toggles a rule on/off without losing its config (used by the VM "alert on/off").
+func (s *Store) SetAlertRuleEnabled(ctx context.Context, id int64, enabled bool) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE alert_rules SET enabled=? WHERE id=?`, toBoolInt(enabled), id)
+	if err != nil {
+		return fmt.Errorf("SetAlertRuleEnabled: %w", err)
+	}
+	return rowsAffected(res, "SetAlertRuleEnabled", id)
+}
+
+// ── alert_state (edge-triggered transitions) ────────────────────────────────────────
+
+// MutedVMIDs returns the set of VM ids excluded from fleet-wide (vm_id=NULL) rules.
+func (s *Store) MutedVMIDs(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT vm_id FROM alert_mutes`)
+	if err != nil {
+		return nil, fmt.Errorf("MutedVMIDs: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("MutedVMIDs scan: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// SetAlertMute mutes (on=true) or unmutes a VM for fleet-wide rules.
+func (s *Store) SetAlertMute(ctx context.Context, vmID int64, on bool) error {
+	if on {
+		_, err := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO alert_mutes (vm_id) VALUES (?)`, vmID)
+		if err != nil {
+			return fmt.Errorf("SetAlertMute(on): %w", err)
+		}
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM alert_mutes WHERE vm_id=?`, vmID)
+	if err != nil {
+		return fmt.Errorf("SetAlertMute(off): %w", err)
+	}
+	return nil
+}
+
+// ── per-server alert channels (where a server's alerts are delivered) ────────────────
+
+// ListVMChannels returns the delivery channels attached to a server's liveness alert.
+func (s *Store) ListVMChannels(ctx context.Context, vmID int64) ([]Channel, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT c.id, c.type, c.name, c.config, c.enabled, c.created_at
+FROM channels c JOIN vm_alert_channels v ON v.channel_id = c.id
+WHERE v.vm_id = ? ORDER BY c.id ASC`, vmID)
+	if err != nil {
+		return nil, fmt.Errorf("ListVMChannels: %w", err)
+	}
+	defer rows.Close()
+	var out []Channel
+	for rows.Next() {
+		var c Channel
+		var config string
+		var enabled int
+		if err := rows.Scan(&c.ID, &c.Type, &c.Name, &config, &enabled, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("ListVMChannels scan: %w", err)
+		}
+		c.Enabled = enabled != 0
+		c.Config = map[string]any{}
+		unmarshalJSONcol(s.decCol(config), &c.Config)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListAllVMChannelIDs returns every (vm_id -> []channel_id) mapping in one query. Used by the
+// fleet/sidebar batch endpoint so the UI does not fan out one request per VM (N+1) just to render
+// the bells — only the id sets are needed for coverage + the fleet picker intersection.
+func (s *Store) ListAllVMChannelIDs(ctx context.Context) (map[int64][]int64, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT vm_id, channel_id FROM vm_alert_channels ORDER BY vm_id, channel_id`)
+	if err != nil {
+		return nil, fmt.Errorf("ListAllVMChannelIDs: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64][]int64{}
+	for rows.Next() {
+		var vmID, chID int64
+		if err := rows.Scan(&vmID, &chID); err != nil {
+			return nil, fmt.Errorf("ListAllVMChannelIDs scan: %w", err)
+		}
+		out[vmID] = append(out[vmID], chID)
+	}
+	return out, rows.Err()
+}
+
+// SetVMChannels replaces a server's alert channels with the given set (the picker sends the full set).
+func (s *Store) SetVMChannels(ctx context.Context, vmID int64, channelIDs []int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("SetVMChannels begin: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM vm_alert_channels WHERE vm_id=?`, vmID); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("SetVMChannels clear: %w", err)
+	}
+	for _, id := range channelIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO vm_alert_channels (vm_id, channel_id) VALUES (?,?)`, vmID, id); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("SetVMChannels insert: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// GetAlertState returns the last seen status for (ruleID, checkID); "" when none recorded.
+func (s *Store) GetAlertState(ctx context.Context, ruleID, checkID int64) (string, error) {
+	var st string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT last_status FROM alert_state WHERE rule_id=? AND check_id=?`, ruleID, checkID).Scan(&st)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("GetAlertState: %w", err)
+	}
+	return st, nil
+}
+
+// ListAlertState loads every (rule_id,check_id)->last_status row in one query, keyed by
+// AlertStateKey(ruleID,checkID). Used by the evaluator's hot loop so it does one round-trip per
+// cycle instead of one per (rule,check) pair.
+func (s *Store) ListAlertState(ctx context.Context) (map[int64]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT rule_id, check_id, last_status FROM alert_state`)
+	if err != nil {
+		return nil, fmt.Errorf("ListAlertState: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var rid, cid int64
+		var st string
+		if err := rows.Scan(&rid, &cid, &st); err != nil {
+			return nil, fmt.Errorf("ListAlertState scan: %w", err)
+		}
+		out[AlertStateKey(rid, cid)] = st
+	}
+	return out, rows.Err()
+}
+
+// AlertStateKey packs (ruleID, checkID) into a single int64 map key shared by ListAlertState and its
+// consumers. checkID is assumed < 1e12.
+func AlertStateKey(ruleID, checkID int64) int64 { return ruleID*1_000_000_000_000 + checkID }
+
+// SetAlertState records the last seen status for (ruleID, checkID) (upsert).
+func (s *Store) SetAlertState(ctx context.Context, ruleID, checkID int64, status string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO alert_state (rule_id, check_id, last_status) VALUES (?,?,?)
+		 ON CONFLICT(rule_id, check_id) DO UPDATE SET last_status=excluded.last_status`,
+		ruleID, checkID, status)
+	if err != nil {
+		return fmt.Errorf("SetAlertState: %w", err)
+	}
+	return nil
 }
 
 // LatestCheckResults returns the newest check_result per enabled check, globally.

@@ -41,3 +41,23 @@ themeLight.subscribe((light) => {
 export function toggleTheme() {
   themeLight.update((v) => !v)
 }
+
+// region alerts [DOMAIN(7): State; CONCEPT(7]: AlertRevision; TECH(6]: svelte/store]
+// A monotonically increasing counter bumped whenever alert rules/mutes change (fleet toggle, per-VM
+// toggle, mute/unmute). Sidebar + fleet subscribe to it so their bells reflect changes made
+// anywhere in the app without a manual reload.
+export const alertRevision = writable(0)
+export function bumpAlerts() {
+  alertRevision.update((n) => n + 1)
+}
+
+// One-shot signal: a deep component (e.g. VmDetail "go to settings" link) requests the Dashboard
+// switch to the Settings view. Dashboard subscribes and resets the flag after switching.
+export const gotoSettings = writable(false)
+
+// Bumped whenever a server's SSH credentials are saved/cleared, so the sidebar + fleet matrix
+// re-fetch the VM list and update the lock badges without a manual page refresh.
+export const credRevision = writable(0)
+export function bumpCreds() {
+  credRevision.update((n) => n + 1)
+}

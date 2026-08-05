@@ -138,6 +138,24 @@ func main() {
 	// Plane A alert evaluator (consumes results, fires alerts to channels).
 	ev := alerts.New(s, alerts.DefaultRegistry(logger), logger, 30*time.Second)
 	ev.Start(ctx)
+
+	// Domain reminders (cert expiry / registration expiry / DNS change): probe domains with any
+	// reminder every 6h and notify via in-app (bell center) + the attached external channel; re-fire
+	// at most once per 24h while triggered. Probe is injected from monitor to avoid an import cycle.
+	domainProbe := func(ctx context.Context, domain string) (alerts.DomainProbe, error) {
+		di, err := monitor.ProbeDomain(ctx, domain)
+		if err != nil {
+			return alerts.DomainProbe{}, err
+		}
+		return alerts.DomainProbe{
+			CertDays:  di.Cert.DaysRemaining,
+			OwnerDays: di.Whois.DaysRemaining,
+			DNSSig:    monitor.DNSSignature(di.DNS),
+			HasCert:   di.Cert.Present,
+			HasOwner:  di.Whois.DaysRemaining >= 0,
+		}, nil
+	}
+	alerts.NewDomainEvaluator(s, alerts.DefaultRegistry(logger), domainProbe, logger, 6*time.Hour).Start(ctx)
 	defer ev.Stop()
 
 	server := api.New(s, cfg.Listen, logger)

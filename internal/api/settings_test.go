@@ -10,9 +10,12 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/skibine/vm-pulse/internal/auth"
 )
 
 func TestHTTP_SettingsAI_MaskedAndPreserve(t *testing.T) {
@@ -95,4 +98,32 @@ func TestHTTP_VMCreds_SecretNotLeaked(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"has_secret":false`) {
 		t.Fatalf("after delete want has_secret false: %s", rec.Body.String())
 	}
+}
+
+// TestHTTP_VMCreds_2FAGate verifies the symmetric cred-gate: storing SSH credentials is refused
+// unless the authenticated user has 2FA enabled. The cred-gate mirrors the one on 2FA-disable, so
+// the invariant "SSH creds in vault ⇔ 2FA on" holds on both sides.
+func TestHTTP_VMCreds_2FAGate(t *testing.T) {
+	srv, _ := newServer(t)
+	rec := do(srv, http.MethodPost, "/api/vms", `{"name":"v","hostname":"h","port_ssh":22}`)
+	var vm struct {
+		ID int64 `json:"id"`
+	}
+	decode(t, rec, &vm)
+	id := strconv.FormatInt(vm.ID, 10)
+
+	// Authenticated request but the (non-existent) user has no TOTP -> gate must refuse.
+	body := `{"ssh_user":"root","auth_type":"password","secret":"topsecret"}`
+	r := httptest.NewRequest(http.MethodPut, "/api/vms/"+id+"/credentials", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r = r.WithContext(auth.WithUser(r.Context(), 999))
+	gate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(gate, r)
+	if gate.Code != http.StatusForbidden {
+		t.Fatalf("PUT creds without 2FA want 403, got %d: %s", gate.Code, gate.Body.String())
+	}
+	if !strings.Contains(gate.Body.String(), "2FA") {
+		t.Fatalf("expected 2FA hint in error, got %s", gate.Body.String())
+	}
+	t.Logf("[IMP:9][TestVMCredsGate][RESULT] blocked without 2FA: status=%d", gate.Code)
 }
