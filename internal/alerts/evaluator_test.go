@@ -67,6 +67,17 @@ func TestEvaluator_FiresAndCooldowns(t *testing.T) {
 
 	// First pass: should fire exactly once.
 	ev.evaluate()
+	// The fired alert is ALSO in the tamper-evident journal (category "alert", vm extractable).
+	var evN int
+	var evDetail string
+	_ = s.DB.QueryRow(`SELECT COUNT(*), MAX(detail) FROM audit_log WHERE action='alert_fire'`).Scan(&evN, &evDetail)
+	if evN != 1 {
+		t.Fatalf("want 1 alert_fire audit row, got %d", evN)
+	}
+	if !strings.Contains(evDetail, "vm="+strconv.FormatInt(vmID, 10)) {
+		t.Fatalf("alert_fire detail missing vm: %s", evDetail)
+	}
+	t.Logf("[IMP:9][TestEvaluator][AUDIT] alert_fire=1 detail=%.80s", evDetail)
 	alerts, _ := s.ListAlerts(ctx, 10)
 	if len(alerts) != 1 {
 		t.Fatalf("after 1st evaluate want 1 alert, got %d", len(alerts))
@@ -102,6 +113,26 @@ func TestEvaluator_FiresAndCooldowns(t *testing.T) {
 	if !saw {
 		t.Error("Anti-Illusion: missing [IMP:9][fire][FIRED] in logs")
 	}
+
+	// No in-app channel attached -> NO bell notification for the alert (opt-in delivery).
+	var notifN int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM notifications WHERE kind='alert'`).Scan(&notifN)
+	if notifN != 0 {
+		t.Fatalf("want 0 alert notifications without in-app channel, got %d", notifN)
+	}
+	// Attach the in-app channel and fire again (new VM/check to get a fresh edge).
+	inAppCh, _ := s.CreateChannel(ctx, store.Channel{Type: "in-app", Name: "bell", Enabled: true})
+	vm2, _ := s.CreateVM(ctx, store.VM{Name: "v2", Hostname: "h2", IP: "127.0.0.1", PortSSH: 22})
+	chk2, _ := s.CreateCheck(ctx, store.Check{VMID: &vm2, TargetType: "vm", CheckType: "tcp", IntervalSec: 60, Enabled: true})
+	_ = s.SetVMChannels(ctx, vm2, []int64{inAppCh})
+	_, _ = s.InsertCheckResult(ctx, chk2, "critical", 0, "refused", nil)
+	ev.evaluate()
+	notifN = 0
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM notifications WHERE kind='alert' AND title LIKE '%v2%'`).Scan(&notifN)
+	if notifN != 1 {
+		t.Fatalf("want 1 in-app notification for v2, got %d", notifN)
+	}
+	t.Logf("[IMP:9][TestEvaluator][INAPP] no-channel=0 in-app-attached=1")
 }
 
 // region FUNC_test_Evaluator_VMScopeAndRecovery [DOMAIN(7): Testing; CONCEPT(8): Scope; TECH(7): evaluator]

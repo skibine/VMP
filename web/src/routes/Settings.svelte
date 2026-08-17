@@ -107,13 +107,16 @@
       aiBusy = false
     }
   }
-
-  // fetchModels lists models from the STORED provider config (key stays server-side).
-  async function fetchModels() {
+  // fetchAndSave = save + fetch in one press. The natural flow is url -> key -> [fetch] -> pick a
+  // model; forcing a separate "save" between key and fetch breaks that chain, so the fetch button
+  // persists the form first (key stays server-side) and then queries /models with it.
+  async function fetchAndSave() {
     modelFetching = true
     aiMsg = ''
     aiOk = false
     try {
+      await saveAI()
+      if (!aiOk) return
       const res = await api.aiModels()
       fetchedModels = res.models || []
       aiMsg = fetchedModels.length ? $t('set.modelsFound', { n: fetchedModels.length }) : $t('set.noModels')
@@ -121,10 +124,21 @@
     } catch (e) {
       fetchedModels = null
       aiMsg = e.message || $t('set.fetchFail')
+      aiOk = false
     } finally {
       modelFetching = false
     }
   }
+
+  // A stored key on the server is enough for /models — the fetch button is enabled once a url
+  // exists AND (a new key is typed OR one is already saved).
+  $: fetchDisabled = !ai.api_url || (keyRequired && !aiKey && !ai.has_key)
+
+  // Alternative official endpoints of the CURRENT preset (e.g. Z.AI coding plan) — shown as
+  // one-click fillers under api_url so a different plan doesn't demote the preset to Custom.
+  $: activeAltUrls = (providers.find((p) => p.id === selectedProvider)?.alt_urls || []).map(
+    (u, i) => ({ url: u, label: (providers.find((p) => p.id === selectedProvider)?.alt_labels || [])[i] || '' })
+  )
 
   async function probeLocal() {
     localProbing = true
@@ -203,17 +217,17 @@
   }
   // Inline edit (rename / fix chat_id without re-pasting the token — secrets are preserved when blank).
   let editing = null // channel id being edited, or null
-  let ec = { name: '', chat_id: '', url: '' }
+  let ec = { name: '', chat_id: '', url: '', ai_chat: false }
   function startEdit(c) {
     editing = c.id
-    ec = { name: c.name || '', chat_id: c.config?.chat_id || '', url: c.config?.url || '' }
+    ec = { name: c.name || '', chat_id: c.config?.chat_id || '', url: c.config?.url || '', ai_chat: !!c.config?.agent_chat_enabled }
     chMsg = ''; chOk = false
   }
   async function saveEdit(c) {
     chBusy = true; chMsg = ''
     try {
       const config = {}
-      if (c.type === 'telegram') config.chat_id = ec.chat_id
+      if (c.type === 'telegram') { config.chat_id = ec.chat_id; config.agent_chat_enabled = !!ec.ai_chat }
       else config.url = ec.url
       await api.updateChannel(c.id, { name: ec.name || c.name, config })
       editing = null
@@ -272,10 +286,13 @@
   onMount(load2FA)
 </script>
 
-<div class="max-w-5xl mx-auto space-y-6">
+<div class="max-w-6xl mx-auto space-y-6">
+  <!-- Two rows of side-by-side panels: account (password + 2FA), then AI provider + delivery
+       channels. items-start keeps each panel compact; collapses to one column on narrow screens. -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
   <section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('set.pwTitle')}</div>
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-2 gap-3 max-w-lg">
       <label class="block space-y-1">
         <span class="hud-label">{$t('set.pwCurrent')}</span>
         <input class="hud-input" type="password" bind:value={pwCurrent} autocomplete="current-password" placeholder="••••••••" />
@@ -291,139 +308,6 @@
     </div>
     <p class="text-[11px] text-hud-dim">// {$t('set.pwHint')}</p>
   </section>
-
-  <section class="hud-panel p-5 space-y-3">
-    <div class="hud-label text-neon-cyan">{$t('set.aiTitle')}</div>
-
-    <label class="block space-y-1">
-      <span class="hud-label">{$t('set.provider')}</span>
-      <select class="hud-input" value={selectedProvider} on:change={onProviderSelect}>
-        {#each providers as p}<option value={p.id}>{p.label}</option>{/each}
-      </select>
-    </label>
-
-    <div class="grid grid-cols-2 gap-3">
-      <label class="block space-y-1 col-span-2">
-        <span class="hud-label">api_url</span>
-        <input class="hud-input" bind:value={ai.api_url} placeholder="https://api.openai.com/v1" />
-      </label>
-
-      {#if keyRequired}
-        <label class="block space-y-1">
-          <span class="hud-label">{$t('set.model')}</span>
-          <input class="hud-input" bind:value={ai.model} placeholder="gpt-4o-mini" list="ai-model-list" />
-        </label>
-        <label class="block space-y-1">
-          <span class="hud-label">api_key {ai.has_key ? $t('set.keyHint') : ''}</span>
-          <input class="hud-input" type="password" bind:value={aiKey} placeholder={ai.has_key ? '••••••' : 'sk-...'} />
-        </label>
-      {:else}
-        <label class="block space-y-1 col-span-2">
-          <span class="hud-label">{$t('set.model')}</span>
-          <input class="hud-input" bind:value={ai.model} placeholder="e.g. llama3.1" list="ai-model-list" />
-        </label>
-        <p class="text-[11px] text-hud-dim col-span-2">{$t('set.localHint')}</p>
-      {/if}
-    </div>
-
-    {#if fetchedModels}
-      <datalist id="ai-model-list">{#each fetchedModels as m}<option value={m}>{/each}</datalist>
-    {/if}
-
-    <div class="flex flex-wrap items-center gap-3">
-      {#if !isLocal}
-        <button class="hud-btn" on:click={fetchModels} disabled={modelFetching}>{modelFetching ? '…' : $t('set.fetchModels')}</button>
-      {/if}
-      {#if isLocal}
-        <button class="hud-btn" on:click={probeLocal} disabled={localProbing}>{localProbing ? '…' : $t('set.detectLocal')}</button>
-      {/if}
-      <button class="hud-btn hud-btn-primary" on:click={saveAI} disabled={aiBusy}>
-        {aiBusy ? $t('g.saving') : aiMsg && aiOk ? $t('g.saved') : $t('g.save')}
-      </button>
-      {#if aiMsg}
-        <span class="text-xs font-mono px-2 py-1 rounded border {aiOk ? 'text-neon-green border-neon-green/40 bg-neon-green/5' : 'text-neon-red border-neon-red/40 bg-neon-red/5'}">{aiMsg}</span>
-      {/if}
-    </div>
-
-    {#if localResults}
-      <div class="space-y-1">
-        <div class="hud-label text-hud-dim">{$t('set.localServers')}</div>
-        {#each localResults as srv}
-          <button class="hud-btn w-full !justify-start text-left" disabled={!srv.alive} on:click={() => selectLocal(srv)}>
-            <span class={srv.alive ? 'text-neon-green' : 'text-hud-dim'}>{srv.alive ? '●' : '○'}</span>
-            {srv.label}
-            {#if srv.alive && srv.models && srv.models.length}<span class="text-hud-dim text-[11px] font-normal">// {$t('set.modelsCount', { n: srv.models.length })}</span>{/if}
-          </button>
-        {/each}
-      </div>
-    {/if}
-
-    <label class="flex items-center gap-2 cursor-pointer select-none pt-1">
-      <input type="checkbox" class="accent-neon-amber" bind:checked={ai.auto_approve} />
-      <span class="hud-label {ai.auto_approve ? 'text-neon-amber' : ''}">{$t('set.autoApprove')}</span>
-      <span class="text-[11px] text-hud-dim">{$t('set.autoApproveHint')}</span>
-    </label>
-  </section>
-
-  <section class="hud-panel p-5 space-y-3">
-    <div class="hud-label text-neon-cyan">{$t('ch.title', { n: channels.length })}</div>
-    <p class="text-xs text-hud-dim">{$t('ch.hint')}</p>
-
-    {#if channels.length}
-      <div class="space-y-1">
-        {#each channels as c (c.id)}
-          {#if editing === c.id}
-            <div class="border border-neon-green/40 rounded px-2 py-1.5 text-xs font-mono space-y-1 bg-neon-green/5">
-              <input class="hud-input" placeholder={$t('ch.namePh')} bind:value={ec.name} />
-              {#if c.type === 'telegram'}<input class="hud-input" placeholder="chat_id" bind:value={ec.chat_id} />{:else}<input class="hud-input" placeholder={$t('ch.urlPh')} bind:value={ec.url} />{/if}
-              <div class="flex items-center gap-1">
-                <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px]" on:click={() => saveEdit(c)} disabled={chBusy}>{$t('g.save')}</button>
-                <button class="hud-btn !py-0.5 !text-[10px]" on:click={() => (editing = null)}>{$t('g.cancel')}</button>
-                <span class="text-[10px] text-hud-dim">{$t('ch.editSecretHint')}</span>
-              </div>
-            </div>
-          {:else}
-            <div class="flex items-center gap-2 border border-hud-line rounded px-2 py-1.5 text-xs font-mono">
-              <span class="text-neon-cyan uppercase w-20">{c.type}</span>
-              <span class="text-emerald-100 flex-1 truncate">{c.name}</span>
-              <span class="text-hud-dim truncate max-w-[35%]">{c.config?.chat_id || c.config?.url || (c.config?.has_token ? '✓ token' : '')}</span>
-              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => testChannel(c.id)} disabled={chBusy}>✉ {$t('ch.test')}</button>
-              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => startEdit(c)} title={$t('g.edit')}>✎</button>
-              <button class="hud-btn !py-0.5 !px-2 !text-neon-red border-neon-red/40" on:click={() => removeChannel(c.id)} title={$t('g.delete')}>✕</button>
-            </div>
-          {/if}
-        {/each}
-      </div>
-    {/if}
-
-    <form on:submit|preventDefault={addChannel} class="grid grid-cols-2 gap-2">
-      <select class="hud-input col-span-2" bind:value={nc.type}>
-        <option value="telegram">telegram</option>
-        <option value="webhook">{$t('ch.webhook')}</option>
-      </select>
-      <input class="hud-input col-span-2" placeholder={$t('ch.namePh')} bind:value={nc.name} />
-      {#if nc.type === 'telegram'}
-        <input class="hud-input col-span-2" placeholder={$t('ch.tokenPh')} bind:value={nc.bot_token} />
-        <div class="col-span-2 flex items-center gap-2">
-          <input class="hud-input flex-1" placeholder={$t('ch.chatPh')} bind:value={nc.chat_id} />
-          <button type="button" class="hud-btn !text-[10px] !px-2 whitespace-nowrap" on:click={resolveChat} disabled={chResolving} title={$t('ch.resolveHint')}>{chResolving ? '…' : $t('ch.resolve')}</button>
-        </div>
-      {:else}
-        <input class="hud-input col-span-2" placeholder={$t('ch.urlPh')} bind:value={nc.url} />
-        <input class="hud-input col-span-2" placeholder={$t('ch.secretPh')} bind:value={nc.secret} />
-      {/if}
-      <button class="hud-btn hud-btn-primary col-span-2" disabled={chBusy}>{chBusy ? '…' : $t('ch.add', { type: nc.type })}</button>
-    </form>
-    {#if nc.type === 'telegram'}
-      <div class="text-[11px] text-hud-dim space-y-1">
-        <div>{$t('ch.tgStep1')} <a class="text-neon-cyan underline" href="https://t.me/BotFather?start=newbot" target="_blank" rel="noopener">BotFather →</a> {$t('ch.tgStep1b')}</div>
-        <div>{$t('ch.tgStep2')}</div>
-        <div>{$t('ch.tgStep3')}</div>
-      </div>
-    {/if}
-    {#if chMsg}<div class="text-xs font-mono {chOk ? 'text-neon-green' : 'text-neon-red'}">{chMsg}</div>{/if}
-  </section>
-
   <section class="hud-panel p-5 space-y-3">
     <div class="flex items-center gap-2">
       <div class="hud-label text-neon-cyan">{$t('set.2faTitle')}</div>
@@ -489,9 +373,157 @@
     {#if twofaMsg}<div class="text-xs text-neon-green font-mono">{twofaMsg}</div>{/if}
     {#if twofaErr}<div class="text-xs text-neon-red font-mono">{twofaErr}</div>{/if}
   </section>
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 
-  <section class="hud-panel p-5">
-    <div class="hud-label text-hud-dim">{$t('set.moreTitle')}</div>
-    <p class="text-xs text-hud-dim mt-2">{$t('set.moreHint')}</p>
+  <section class="hud-panel p-5 space-y-3">
+    <div class="hud-label text-neon-cyan">{$t('set.aiTitle')}</div>
+    <!-- Form column: inputs do NOT span the full page width (operator feedback — "трэшачок");
+         md ≈ provider select / key / model fields at a comfortable reading width. -->
+    <div class="max-w-md space-y-3">
+    <label class="block space-y-1">
+      <span class="hud-label">{$t('set.provider')}</span>
+      <select class="hud-input" value={selectedProvider} on:change={onProviderSelect}>
+        {#each providers as p}<option value={p.id}>{p.label}</option>{/each}
+      </select>
+    </label>
+
+    <label class="block space-y-1">
+      <span class="hud-label">api_url</span>
+      <input class="hud-input" bind:value={ai.api_url} placeholder="https://api.openai.com/v1" />
+    </label>
+
+    {#if keyRequired}
+      <div class="flex items-end gap-2">
+        <label class="block space-y-1 flex-1">
+          <span class="hud-label">api_key {ai.has_key ? $t('set.keyHint') : ''}</span>
+          <input class="hud-input" type="password" bind:value={aiKey} placeholder={ai.has_key ? '••••••' : 'sk-...'} />
+        </label>
+        <button class="hud-btn whitespace-nowrap" on:click={fetchAndSave} disabled={modelFetching || fetchDisabled}
+          title={$t('set.fetchHint')}>{modelFetching ? '…' : $t('set.fetchModels')}</button>
+      </div>
+    {/if}
+
+    <label class="block space-y-1">
+      <span class="hud-label">{$t('set.model')}</span>
+      <input class="hud-input" bind:value={ai.model} placeholder={keyRequired ? 'gpt-4o-mini' : 'e.g. llama3.1'} list="ai-model-list" />
+    </label>
+
+    {#if !keyRequired}
+      <div class="flex items-end gap-2">
+        <p class="text-[11px] text-hud-dim flex-1">{$t('set.localHint')}</p>
+        <button class="hud-btn whitespace-nowrap" on:click={fetchAndSave} disabled={modelFetching || fetchDisabled}
+          title={$t('set.fetchHint')}>{modelFetching ? '…' : $t('set.fetchModels')}</button>
+      </div>
+    {/if}
+
+    {#if selectedProvider !== 'custom' && activeAltUrls.length}
+      <div class="text-[11px] text-hud-dim">
+        {#each activeAltUrls as alt, i}
+          <button class="text-neon-cyan underline" on:click={() => (ai.api_url = alt.url)}>{$t('set.altEndpoint')} {alt.label}: {alt.url}</button>
+        {/each}
+      </div>
+    {/if}
+
+    {#if fetchedModels}
+      <datalist id="ai-model-list">{#each fetchedModels as m}<option value={m}>{/each}</datalist>
+    {/if}
+
+    <div class="flex flex-wrap items-center gap-3">
+      {#if isLocal}
+        <button class="hud-btn" on:click={probeLocal} disabled={localProbing}>{localProbing ? '…' : $t('set.detectLocal')}</button>
+      {/if}
+      <button class="hud-btn hud-btn-primary" on:click={saveAI} disabled={aiBusy}>
+        {aiBusy ? $t('g.saving') : aiMsg && aiOk ? $t('g.saved') : $t('g.save')}
+      </button>
+      {#if aiMsg}
+        <span class="text-xs font-mono px-2 py-1 rounded border {aiOk ? 'text-neon-green border-neon-green/40 bg-neon-green/5' : 'text-neon-red border-neon-red/40 bg-neon-red/5'}">{aiMsg}</span>
+      {/if}
+    </div>
+
+    {#if localResults}
+      <div class="space-y-1">
+        <div class="hud-label text-hud-dim">{$t('set.localServers')}</div>
+        {#each localResults as srv}
+          <button class="hud-btn w-full !justify-start text-left" disabled={!srv.alive} on:click={() => selectLocal(srv)}>
+            <span class={srv.alive ? 'text-neon-green' : 'text-hud-dim'}>{srv.alive ? '●' : '○'}</span>
+            {srv.label}
+            {#if srv.alive && srv.models && srv.models.length}<span class="text-hud-dim text-[11px] font-normal">// {$t('set.modelsCount', { n: srv.models.length })}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    <label class="flex items-center gap-2 cursor-pointer select-none pt-1">
+      <input type="checkbox" class="accent-neon-amber" bind:checked={ai.auto_approve} />
+      <span class="hud-label {ai.auto_approve ? 'text-neon-amber' : ''}">{$t('set.autoApprove')}</span>
+      <span class="text-[11px] text-hud-dim">{$t('set.autoApproveHint')}</span>
+    </label>
+    </div>
   </section>
+
+  <section class="hud-panel p-5 space-y-3">
+    <div class="hud-label text-neon-cyan">{$t('ch.title', { n: channels.length })}</div>
+    <p class="text-xs text-hud-dim">{$t('ch.hint')}</p>
+
+    {#if channels.length}
+      <div class="space-y-1">
+        {#each channels as c (c.id)}
+          {#if editing === c.id}
+            <div class="border border-neon-green/40 rounded px-2 py-1.5 text-xs font-mono space-y-1 bg-neon-green/5">
+              <input class="hud-input" placeholder={$t('ch.namePh')} bind:value={ec.name} />
+              {#if c.type === 'telegram'}<input class="hud-input" placeholder="chat_id" bind:value={ec.chat_id} />
+                <label class="flex items-center gap-2 text-[11px] text-hud-dim cursor-pointer">
+                  <input type="checkbox" bind:checked={ec.ai_chat} />
+                  <span class={ec.ai_chat ? 'text-neon-green' : ''}>{$t('ch.aiChat')}</span>
+                </label>
+              {:else}<input class="hud-input" placeholder={$t('ch.urlPh')} bind:value={ec.url} />{/if}
+              <div class="flex items-center gap-1">
+                <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px]" on:click={() => saveEdit(c)} disabled={chBusy}>{$t('g.save')}</button>
+                <button class="hud-btn !py-0.5 !text-[10px]" on:click={() => (editing = null)}>{$t('g.cancel')}</button>
+                <span class="text-[10px] text-hud-dim">{$t('ch.editSecretHint')}</span>
+              </div>
+            </div>
+          {:else}
+            <div class="flex items-center gap-2 border border-hud-line rounded px-2 py-1.5 text-xs font-mono">
+              <span class="text-neon-cyan uppercase w-20">{c.type}</span>
+              <span class="text-emerald-100 flex-1 truncate">{c.name}</span>
+              <span class="text-hud-dim truncate max-w-[35%]">{c.config?.chat_id || c.config?.url || (c.config?.has_token ? '✓ token' : '')}{c.config?.agent_chat_enabled ? ' · AI' : ''}</span>
+              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => testChannel(c.id)} disabled={chBusy}>✉ {$t('ch.test')}</button>
+              <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => startEdit(c)} title={$t('g.edit')}>✎</button>
+              <button class="hud-btn !py-0.5 !px-2 !text-neon-red border-neon-red/40" on:click={() => removeChannel(c.id)} title={$t('g.delete')}>✕</button>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+
+    <form on:submit|preventDefault={addChannel} class="grid grid-cols-2 gap-2">
+      <select class="hud-input col-span-2" bind:value={nc.type}>
+        <option value="telegram">telegram</option>
+        <option value="webhook">{$t('ch.webhook')}</option>
+      </select>
+      <input class="hud-input col-span-2" placeholder={$t('ch.namePh')} bind:value={nc.name} />
+      {#if nc.type === 'telegram'}
+        <input class="hud-input col-span-2" placeholder={$t('ch.tokenPh')} bind:value={nc.bot_token} />
+        <div class="col-span-2 flex items-center gap-2">
+          <input class="hud-input flex-1" placeholder={$t('ch.chatPh')} bind:value={nc.chat_id} />
+          <button type="button" class="hud-btn !text-[10px] !px-2 whitespace-nowrap" on:click={resolveChat} disabled={chResolving} title={$t('ch.resolveHint')}>{chResolving ? '…' : $t('ch.resolve')}</button>
+        </div>
+      {:else}
+        <input class="hud-input col-span-2" placeholder={$t('ch.urlPh')} bind:value={nc.url} />
+        <input class="hud-input col-span-2" placeholder={$t('ch.secretPh')} bind:value={nc.secret} />
+      {/if}
+      <button class="hud-btn hud-btn-primary col-span-2" disabled={chBusy}>{chBusy ? '…' : $t('ch.add', { type: nc.type })}</button>
+    </form>
+    {#if nc.type === 'telegram'}
+      <div class="text-[11px] text-hud-dim space-y-1">
+        <div>{$t('ch.tgStep1')} <a class="text-neon-cyan underline" href="https://t.me/BotFather?start=newbot" target="_blank" rel="noopener">BotFather →</a> {$t('ch.tgStep1b')}</div>
+        <div>{$t('ch.tgStep2')}</div>
+        <div>{$t('ch.tgStep3')}</div>
+      </div>
+    {/if}
+    {#if chMsg}<div class="text-xs font-mono {chOk ? 'text-neon-green' : 'text-neon-red'}">{chMsg}</div>{/if}
+  </section>
+  </div>
 </div>

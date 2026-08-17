@@ -79,8 +79,51 @@ ORDER BY c.id ASC`
 	return out, rows.Err()
 }
 
-// region FUNC_LatestResultsForVM [DOMAIN(8): Storage; CONCEPT(7): Read; TECH(8): SQLite,JOIN]
-// @purpose Return each check of the VM joined with its newest check_result row.
+// region FUNC_LatestResultsForDomain [DOMAIN(8): Storage; CONCEPT(7): Read; TECH(8): SQLite,JOIN]
+// @purpose Return each check of the DOMAIN joined with its newest check_result row — the mirror of
+//
+//	LatestResultsForVM for the domain read model. Feeds the AI domain tools (list_domains) so the
+//	assistant can report the stored tls/whois/dns status without a live probe.
+//
+// @complexity 5
+// endregion FUNC_LatestResultsForDomain
+func (s *Store) LatestResultsForDomain(ctx context.Context, domainID int64) ([]VMCheckStatus, error) {
+	const q = `
+SELECT c.id, c.check_type, c.enabled,
+       COALESCE(r.ts,''), COALESCE(r.status,''), COALESCE(r.latency_ms,0), COALESCE(r.message,''),
+       COALESCE(r.detail,'')
+FROM checks c
+LEFT JOIN check_results r
+  ON r.check_id = c.id
+ AND r.id = (SELECT MAX(id) FROM check_results WHERE check_id = c.id)
+WHERE c.domain_id = ?
+ORDER BY c.id ASC`
+	rows, err := s.DB.QueryContext(ctx, q, domainID)
+	if err != nil {
+		return nil, fmt.Errorf("LatestResultsForDomain: %w", err)
+	}
+	defer rows.Close()
+	var out []VMCheckStatus
+	for rows.Next() {
+		var v VMCheckStatus
+		var enabled int
+		var detailJSON string
+		if err := rows.Scan(&v.CheckID, &v.CheckType, &enabled, &v.LatestTS,
+			&v.LatestStatus, &v.LatestLatency, &v.LatestMessage, &detailJSON); err != nil {
+			return nil, fmt.Errorf("LatestResultsForDomain scan: %w", err)
+		}
+		v.Enabled = enabled != 0
+		if detailJSON != "" {
+			var d map[string]any
+			if err := json.Unmarshal([]byte(detailJSON), &d); err == nil {
+				v.LatestDetail = d
+			}
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // VMExists reports whether a VM with the given id exists (any archive state).
 func (s *Store) VMExists(ctx context.Context, vmID int64) (bool, error) {
 	var one int

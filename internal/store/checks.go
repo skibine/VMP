@@ -86,6 +86,27 @@ func (s *Store) ListChecks(ctx context.Context, vmID *int64) ([]Check, error) {
 	return out, rows.Err()
 }
 
+// region FUNC_ListChecksByDomain [DOMAIN(8): Storage; CONCEPT(6): Read; TECH(6): database/sql]
+// @purpose List the checks of one domain (whois/tls/dns rows) — read model for UI + AI tools.
+// @complexity 3
+// endregion FUNC_ListChecksByDomain
+func (s *Store) ListChecksByDomain(ctx context.Context, domainID int64) ([]Check, error) {
+	rows, err := s.DB.QueryContext(ctx, checkSelectCols()+` WHERE domain_id = ? ORDER BY id ASC`, domainID)
+	if err != nil {
+		return nil, fmt.Errorf("ListChecksByDomain: %w", err)
+	}
+	defer rows.Close()
+	var out []Check
+	for rows.Next() {
+		c, err := scanCheck(rows)
+		if err != nil {
+			return nil, fmt.Errorf("ListChecksByDomain scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // region FUNC_UpdateCheck [DOMAIN(8): Storage; CONCEPT(7): Update; TECH(7): database/sql]
 // @purpose Update all mutable check fields by id (validates first).
 // @complexity 5

@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/skibine/vm-pulse/internal/audit"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/store"
 )
@@ -212,17 +215,17 @@ func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult) {
 		Title: title, Body: body,
 	}
 	deliveryLog := map[string]any{}
-	inApp := false // whether this server has the in-app channel attached (optional, user-chosen)
+	// in-app delivery = a bell NOTIFICATION, but ONLY when the operator attached the in-app
+	// channel to this server (explicit opt-in, same as telegram). The full fired-alert journal
+	// lives on the events page (alert_fire rows) — the bell is a DELIVERY target, not the journal.
+	inApp := false
 	for _, ch := range channels {
 		if !ch.Enabled {
 			continue
 		}
 		if ch.Type == "in-app" {
-			// in-app delivery is handled below (needs store access to create a notification); skip the
-			// external delivery path so it isn't reported as "no implementation".
 			inApp = true
-			deliveryLog[fmt.Sprintf("%d", ch.ID)] = map[string]any{"channel": ch.Name, "type": ch.Type, "ok": true}
-			continue
+			continue // delivered below (needs store access), not via the registry
 		}
 		impl, ok := e.reg.Get(ch.Type)
 		entry := map[string]any{"channel": ch.Name, "type": ch.Type}
@@ -238,8 +241,6 @@ func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult) {
 		}
 		deliveryLog[fmt.Sprintf("%d", ch.ID)] = entry
 	}
-	// in-app delivery: only when the operator attached the in-app channel to this server. NOT
-	// unconditional — the user chooses whether alerts also surface in the bell dropdown.
 	if inApp {
 		if _, nerr := e.store.CreateNotification(e.ctx, store.Notification{
 			Title: msg.Title, Body: msg.Body, Kind: "alert", RefID: res.VMID,
@@ -255,8 +256,46 @@ func (e *Evaluator) fire(rule store.AlertRule, res store.LatestCheckResult) {
 		logging.LDD(e.logger, 10, "fire", "INSERT_FAIL", err.Error())
 		return
 	}
+	// The fired alert is ALSO an event in the tamper-evident journal (category "alert") — the
+	// events page is the single place where the operator reviews what happened (alerts included).
+	// `delivered=` summarizes WHERE the alert actually went (per-channel ok/err) so a silent
+	// telegram is diagnosable straight from the event row (detached channels => "none").
+	vmPart := ""
+	if res.VMID != nil {
+		vmPart = fmt.Sprintf("vm=%d ", *res.VMID)
+	}
+	delivered := make([]string, 0, len(deliveryLog))
+	for _, v := range deliveryLog {
+		if entry, ok := v.(map[string]any); ok {
+			kind, _ := entry["type"].(string)
+			if entry["ok"] == true {
+				delivered = append(delivered, kind+":ok")
+			} else if errText, _ := entry["err"].(string); errText != "" {
+				delivered = append(delivered, kind+":"+truncateRunes(errText, 60))
+			}
+		}
+	}
+	sort.Strings(delivered)
+	if len(delivered) == 0 {
+		delivered = append(delivered, "none (no channels attached)")
+	}
+	_ = audit.Append(e.store.DB, e.logger, audit.Entry{
+		Plane: audit.PlaneA, Action: "alert_fire", Success: true,
+		Detail: fmt.Sprintf("%srule=%s check=%d severity=%s delivered=%s msg=%s",
+			vmPart, ruleName, res.CheckID, rule.Severity,
+			strings.Join(delivered, ", "), truncateRunes(msg.Title, 120)),
+	})
 	logging.LDD(e.logger, 9, "fire", "FIRED",
 		fmt.Sprintf("alert=%d rule=%s check=%d severity=%s", alertID, rule.Name, res.CheckID, rule.Severity))
+}
+
+// truncateRunes clips s to at most n runes (event detail stays one readable line).
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:n]) + "…"
 }
 
 // parseTime parses the SQLite-produced RFC3339-ish timestamp.

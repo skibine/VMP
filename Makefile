@@ -14,6 +14,11 @@ WEB := web
 # distribution, but these flags reduce false-positive detections significantly.
 LDFLAGS := -s -w -buildid=
 BUILDFLAGS := -trimpath -buildvcs=false
+# Version stamp injected into main.Version. "git describe" yields the nearest tag (or the short SHA
+# with --always), suffixed -dirty for uncommitted changes; falls back to "dev" outside a git repo.
+# No spaces, so the -X value needs no quoting (nested quotes would break the outer -ldflags '...').
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)-$(shell date +%Y%m%d-%H%M)
+LDFLAGS += -X main.Version=$(VERSION)
 
 .PHONY: all build web vet test run tidy clean test-loop web-dev build-windows
 

@@ -319,10 +319,132 @@ FROM alerts ORDER BY triggered_at DESC LIMIT ?`, limit)
 	return out, rows.Err()
 }
 
+// AlertFilter drives ListAlertsFiltered (the bell modal's "alerts" tab).
+type AlertFilter struct {
+	Severity   string // warning | critical | "" = all
+	VMID       *int64 // nil = all servers
+	From       string // YYYY-MM-DD inclusive
+	To         string // YYYY-MM-DD inclusive
+	UnackOnly  bool   // only rows not yet acknowledged (tab unread counter)
+	Limit      int
+	Offset     int
+}
+
+// region FUNC_ListAlertsFiltered [DOMAIN(8): Alerting; CONCEPT(7): ReadHistory; TECH(6): database/sql]
+// @purpose Paged fired-alert history for the modal: severity/vm/date filters, triggered_at DESC,
+//
+//	with a total count for pagination.
+//
+// @complexity 5
+// endregion FUNC_ListAlertsFiltered
+func (s *Store) ListAlertsFiltered(ctx context.Context, f AlertFilter) ([]Alert, int, error) {
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
+	where := " WHERE 1=1"
+	var args []any
+	if f.Severity != "" {
+		where += " AND severity = ?"
+		args = append(args, f.Severity)
+	}
+	if f.VMID != nil {
+		where += " AND vm_id = ?"
+		args = append(args, *f.VMID)
+	}
+	if f.UnackOnly {
+		where += " AND COALESCE(acknowledged_at,'') = ''"
+	}
+	if f.From != "" {
+		where += " AND triggered_at >= ?"
+		args = append(args, f.From)
+	}
+	if f.To != "" {
+		where += " AND triggered_at < date(?, '+1 day')"
+		args = append(args, f.To)
+	}
+	var total int
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM alerts"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("ListAlertsFiltered count: %w", err)
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id, rule_id, check_id, vm_id, severity, message, triggered_at, COALESCE(acknowledged_at,''), COALESCE(delivery_log,'')
+FROM alerts`+where+` ORDER BY triggered_at DESC, id DESC LIMIT ? OFFSET ?`,
+		append(args, f.Limit, f.Offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ListAlertsFiltered: %w", err)
+	}
+	defer rows.Close()
+	var out []Alert
+	for rows.Next() {
+		var a Alert
+		var vmID sql.NullInt64
+		var ack, dlog string
+		if err := rows.Scan(&a.ID, &a.RuleID, &a.CheckID, &vmID, &a.Severity, &a.Message, &a.TriggeredAt, &ack, &dlog); err != nil {
+			return nil, 0, fmt.Errorf("ListAlertsFiltered scan: %w", err)
+		}
+		a.VMID = toInt64Ptr(vmID)
+		a.DeliveryLog = map[string]any{}
+		unmarshalJSONcol(dlog, &a.DeliveryLog)
+		out = append(out, a)
+	}
+	return out, total, rows.Err()
+}
+
+// region FUNC_AcknowledgeAlert [DOMAIN(8): Alerting; CONCEPT(6): Acknowledge; TECH(5): database/sql]
+// @purpose Mark one fired alert acknowledged (the "read" of the alerts tab): it leaves the
+//
+//	unack counter and dims in the list. Idempotent.
+//
+// @complexity 2
+// endregion FUNC_AcknowledgeAlert
+func (s *Store) AcknowledgeAlert(ctx context.Context, id int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE alerts SET acknowledged_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND COALESCE(acknowledged_at,'')=''`, id)
+	if err != nil {
+		return fmt.Errorf("AcknowledgeAlert: %w", err)
+	}
+	return nil
+}
+
+// region FUNC_AcknowledgeAllAlerts [DOMAIN(8): Alerting; CONCEPT(6): Acknowledge; TECH(5): database/sql]
+// @purpose Acknowledge every unacknowledged alert ("mark all read" of the alerts tab).
+// @complexity 2
+// endregion FUNC_AcknowledgeAllAlerts
+func (s *Store) AcknowledgeAllAlerts(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE alerts SET acknowledged_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE COALESCE(acknowledged_at,'')=''`)
+	if err != nil {
+		return fmt.Errorf("AcknowledgeAllAlerts: %w", err)
+	}
+	return nil
+}
+
+// region FUNC_DeleteAlerts [DOMAIN(8): Alerting; CONCEPT(7): Purge; TECH(5): database/sql]
+// @purpose Delete fired-alert history: everything, or only rows triggered before a date.
+//
+//	Alerts are delivery records (the rules/config live elsewhere) — history purge is safe.
+//
+// @complexity 3
+// endregion FUNC_DeleteAlerts
+func (s *Store) DeleteAlerts(ctx context.Context, before string) (int64, error) {
+	var res sql.Result
+	var err error
+	if before != "" {
+		res, err = s.DB.ExecContext(ctx, `DELETE FROM alerts WHERE triggered_at < date(?, '+1 day')`, before)
+	} else {
+		res, err = s.DB.ExecContext(ctx, `DELETE FROM alerts`)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("DeleteAlerts: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	logging.LDD(s.logger, 8, "DeleteAlerts", "DELETED", fmt.Sprintf("rows=%d before=%s", n, before))
+	return n, nil
+}
+
 // LastAlertFor returns the triggered_at of the most recent alert for (ruleID, checkID),
 // and false when none exists (used by the evaluator for cooldown).
-func (s *Store) LastAlertFor(ctx context.Context, ruleID, checkID int64) (string, bool, error) {
-	var ts string
+func (s *Store) LastAlertFor(ctx context.Context, ruleID, checkID int64) (string, bool, error) {	var ts string
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT triggered_at FROM alerts WHERE rule_id=? AND check_id=? ORDER BY triggered_at DESC LIMIT 1`,
 		ruleID, checkID).Scan(&ts)

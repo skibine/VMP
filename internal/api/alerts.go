@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/skibine/vm-pulse/internal/alerts"
@@ -48,6 +49,10 @@ func registerAlerts(mux *http.ServeMux, a *crudAPI) {
 
 	// Fired alerts.
 	mux.HandleFunc("GET /api/alerts", a.listAlerts)
+	mux.HandleFunc("GET /api/alerts/all", a.listAllAlerts)
+	mux.HandleFunc("POST /api/alerts/{id}/ack", a.ackAlert)
+	mux.HandleFunc("POST /api/alerts/ack-all", a.ackAllAlerts)
+	mux.HandleFunc("DELETE /api/alerts", a.clearAllAlerts)
 
 	// Per-VM mute (exclude a VM from fleet-wide rules).
 	mux.HandleFunc("GET /api/alert-mutes", a.listAlertMutes)
@@ -104,6 +109,7 @@ func (a *crudAPI) createAlertRule(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "createAlertRule", err)
 		return
 	}
+	a.auditConfig("alert_rule_create", 0, "rule_id="+strconv.FormatInt(id, 10)+" name="+rule.Name)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
@@ -116,6 +122,7 @@ func (a *crudAPI) deleteAlertRule(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "deleteAlertRule", err)
 		return
 	}
+	a.auditConfig("alert_rule_delete", 0, "rule_id="+strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -315,6 +322,22 @@ func (a *crudAPI) testChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "channel is disabled"})
 		return
 	}
+	// in-app has no external transport to POST — a "test" is a notification row in the bell center.
+	// It verifies the only thing that can fail for this channel type: that notifications land.
+	if ch.Type == "in-app" {
+		_, derr := a.st.CreateNotification(r.Context(), store.Notification{
+			Title: "✅ VM Pulse: channel test", Body: "If you see this, the in-app channel is working.",
+			Kind:  "test",
+		})
+		if derr != nil {
+			logging.LDD(a.logger, 8, "testChannel", "INAPP_FAIL", derr.Error())
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": derr.Error()})
+			return
+		}
+		logging.LDD(a.logger, 8, "testChannel", "INAPP_OK", fmt.Sprintf("channel=%d", id))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	reg := alerts.DefaultRegistry(a.logger)
 	impl, found := reg.Get(ch.Type)
 	if !found {
@@ -372,6 +395,93 @@ func (a *crudAPI) listAlerts(w http.ResponseWriter, r *http.Request) {
 		alerts = []store.Alert{}
 	}
 	writeJSON(w, http.StatusOK, alerts)
+}
+
+// region FUNC_listAllAlerts [DOMAIN(7): API; CONCEPT(7): ReadHistory; TECH(6): net/http]
+// @purpose Paged + filtered fired-alert history for the bell modal ("show all"): ?page,
+//
+//	?page_size (max 200), ?severity (warning|critical), ?vm_id, ?from/?to (YYYY-MM-DD).
+//	Returns {alerts,total,page,page_size}. (Plain GET /api/alerts keeps its legacy array shape.)
+//
+// @complexity 4
+// endregion FUNC_listAllAlerts
+func (a *crudAPI) listAllAlerts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := max(1, atoiDefault(q.Get("page"), 1))
+	size := clampInt(atoiDefault(q.Get("page_size"), 50), 1, 200)
+	var vmID *int64
+	if raw := q.Get("vm_id"); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			vmID = &n
+		}
+	}
+	alerts, total, err := a.st.ListAlertsFiltered(r.Context(), store.AlertFilter{
+		Severity: q.Get("severity"), VMID: vmID, From: q.Get("from"), To: q.Get("to"),
+		UnackOnly: q.Get("unack") == "1",
+		Limit:     size, Offset: (page - 1) * size,
+	})
+	if err != nil {
+		a.writeErr(w, "listAllAlerts", err)
+		return
+	}
+	if alerts == nil {
+		alerts = []store.Alert{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alerts": alerts, "total": total, "page": page, "page_size": size,
+	})
+}
+
+// int64s maps []int64 to []string (audit detail helper).
+func int64s(xs []int64) []string {
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		out = append(out, strconv.FormatInt(x, 10))
+	}
+	return out
+}
+
+// region FUNC_ackAlert [DOMAIN(7): API; CONCEPT(6): Acknowledge; TECH(5): net/http]
+// @purpose Mark one fired alert acknowledged (the "read" click of the alerts tab).
+// @complexity 2
+// endregion FUNC_ackAlert
+func (a *crudAPI) ackAlert(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := a.st.AcknowledgeAlert(r.Context(), id); err != nil {
+		a.writeErr(w, "ackAlert", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
+}
+
+// region FUNC_ackAllAlerts [DOMAIN(7): API; CONCEPT(6): Acknowledge; TECH(4): net/http]
+// @purpose Acknowledge all unacknowledged alerts ("mark all read" of the alerts tab).
+// @complexity 2
+// endregion FUNC_ackAllAlerts
+func (a *crudAPI) ackAllAlerts(w http.ResponseWriter, r *http.Request) {
+	if err := a.st.AcknowledgeAllAlerts(r.Context()); err != nil {
+		a.writeErr(w, "ackAllAlerts", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
+}
+
+// region FUNC_clearAllAlerts [DOMAIN(7): API; CONCEPT(6): Purge; TECH(5): net/http]
+// @purpose DELETE /api/alerts?before=YYYY-MM-DD (empty = all) — the modal's clear buttons.
+// @complexity 3
+// endregion FUNC_clearAllAlerts
+func (a *crudAPI) clearAllAlerts(w http.ResponseWriter, r *http.Request) {
+	deleted, err := a.st.DeleteAlerts(r.Context(), r.URL.Query().Get("before"))
+	if err != nil {
+		a.writeErr(w, "clearAllAlerts", err)
+		return
+	}
+	logging.LDD(a.logger, 8, "clearAllAlerts", "CLEARED", fmt.Sprintf("rows=%d", deleted))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "cleared", "deleted": deleted})
 }
 
 // listAlertMutes returns the VM ids excluded from fleet-wide rules.
@@ -441,6 +551,8 @@ func (a *crudAPI) setVMAlertChannels(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "setVMAlertChannels", err)
 		return
 	}
+	a.auditConfig("vm_channels_set", id,
+		"vm="+strconv.FormatInt(id, 10)+" channels="+strings.Join(int64s(body.ChannelIDs), ","))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

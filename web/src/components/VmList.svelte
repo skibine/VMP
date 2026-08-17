@@ -29,6 +29,7 @@
   let domErr = ''
   let domBusy = false
   let serversOpen = true
+  let equipOpen = true
   let domainsOpen = true
 
   async function refreshHealth() {
@@ -67,6 +68,9 @@
   // Liveness-alert bell state is shared (lib/alerts.js): one batch fetch, one "isCovered" rule used
   // by the sidebar, fleet matrix and VM detail alike. A transient fetch keeps last-known (no blank).
   $: alertedIds = new Set(vms.filter((v) => vmAlerted(v.id, $coverage)).map((v) => v.id))
+  // Semantic split: servers vs network equipment (routers/cameras/web panels, kind != server).
+  $: serverVms = vms.filter((v) => !v.kind || v.kind === 'server')
+  $: equipVms = vms.filter((v) => v.kind && v.kind !== 'server')
 
   async function load() {
     loading = true
@@ -175,11 +179,11 @@
         </span>
       </button>
 
-      <!-- servers group -->
+      <!-- servers group (kind=server) -->
       <div class="relative">
         <button class="w-full text-left px-2 py-1.5 flex items-center gap-1 hover:bg-hud-panel2 border-b border-hud-line/60" on:click={() => (serversOpen = !serversOpen)}>
           <span class="text-[10px] text-hud-dim w-3">{serversOpen ? '▾' : '▸'}</span>
-          <span class="hud-label text-neon-green">{$t('list.servers', { n: vms.length })}</span>
+          <span class="hud-label text-neon-green">{$t('list.servers', { n: serverVms.length })}</span>
           <button class="hud-btn !px-1.5 !py-0 ml-auto !text-[10px]" on:click|stopPropagation={() => (showAddVm = !showAddVm)} title={$t('list.addVm')}>{showAddVm ? '−' : '+'}</button>
         </button>
         {#if showAddVm}
@@ -190,7 +194,7 @@
         {/if}
       </div>
       {#if serversOpen}
-        {#each vms as vm (vm.id)}
+        {#each serverVms as vm (vm.id)}
           {@const st = health[vm.id] ?? 'unknown'}
           <button
             class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selKind === 'vm' && selId === vm.id ? 'bg-hud-panel2 border-l-2 border-l-neon-green' : ''}"
@@ -206,7 +210,32 @@
             {#if alertedIds.has(vm.id)}<Bell size={12} cls="text-neon-green shrink-0" />{/if}
           </button>
         {/each}
-        {#if !vms.length}<div class="px-3 py-2 hud-label text-hud-dim">{$t('list.empty')}</div>{/if}
+        {#if !serverVms.length}<div class="px-3 py-2 hud-label text-hud-dim">{$t('list.empty')}</div>{/if}
+      {/if}
+
+      <!-- equipment group (kind=network/iot/web) -->
+      {#if equipVms.length}
+        <button class="w-full text-left px-2 py-1.5 flex items-center gap-1 hover:bg-hud-panel2 border-b border-hud-line/60" on:click={() => (equipOpen = !equipOpen)}>
+          <span class="text-[10px] text-hud-dim w-3">{equipOpen ? '▾' : '▸'}</span>
+          <span class="hud-label text-neon-amber">{$t('list.equipment', { n: equipVms.length })}</span>
+        </button>
+        {#if equipOpen}
+          {#each equipVms as vm (vm.id)}
+            {@const st = health[vm.id] ?? 'unknown'}
+            <button
+              class="w-full text-left px-3 py-2 border-b border-hud-line/60 flex items-center gap-2 hover:bg-hud-panel2 transition-colors {selKind === 'vm' && selId === vm.id ? 'bg-hud-panel2 border-l-2 border-l-neon-green' : ''}"
+              on:click={() => dispatch('select', { kind: 'vm', id: vm.id })}
+            >
+              <span class="h-2 w-2 rounded-full shrink-0 {dotClass(st)}" title={dotTitle(st)}></span>
+              <span class="text-[9px] font-mono px-1 rounded border border-neon-amber/40 text-neon-amber shrink-0 uppercase">{$t('vmk.equipment')}</span>
+              <span class="min-w-0 flex-1">
+                <span class="block font-mono text-sm text-emerald-100 truncate">{vm.name}</span>
+                <span class="block text-[10px] text-hud-dim font-mono truncate">{vm.ip || vm.hostname}</span>
+              </span>
+              {#if alertedIds.has(vm.id)}<Bell size={12} cls="text-neon-green shrink-0" />{/if}
+            </button>
+          {/each}
+        {/if}
       {/if}
 
       <!-- domains group -->

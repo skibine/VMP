@@ -642,7 +642,10 @@
     <div class="hud-panel p-2.5 space-y-1.5">
       <div class="flex items-center gap-2">
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {lampClass}" title={headerVerdict}></span>
-        <h2 class="font-mono text-neon-green text-base truncate">{vm.name}</h2>
+        <h2 class="font-mono text-neon-green text-base truncate">
+          {#if vm.kind && vm.kind !== 'server'}<span class="text-[10px] font-mono px-1 py-0.5 mr-1 rounded border border-neon-amber/40 text-neon-amber uppercase align-middle">{$t('vmk.equipment')}</span>{/if}
+          {vm.name}
+        </h2>
         <span class="text-xs text-hud-dim font-mono shrink-0">{vm.ip || vm.hostname}{vm.port_ssh && vm.port_ssh !== 22 ? ':' + vm.port_ssh : ''}</span>
         <span class="hud-label text-{headerColor} uppercase shrink-0 ml-auto">{headerVerdict === 'up' ? $t('vd.up') : headerVerdict === 'down' ? $t('vd.down') : headerVerdict}</span>
         <button class="hud-btn !py-0.5 !px-2 !text-xs shrink-0" on:click={() => (editMode = !editMode)} title={$t('vd.edit')}>{editMode ? $t('g.close') : $t('vd.edit')}</button>

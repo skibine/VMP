@@ -16,11 +16,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/skibine/vm-pulse/internal/audit"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/monitor"
 )
@@ -41,6 +44,7 @@ func registerDiagnostics(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/domains/{id}/info", a.domainInfo)
 	mux.HandleFunc("GET /api/domains/{id}/health", a.domainHealth)
 	// Domain intel (Plane A, keyless): per-IP geo/ASN/PTR + a port scan of the resolved address.
+	mux.HandleFunc("GET /api/domains/{id}/intel", a.domainIntel)
 	mux.HandleFunc("GET /api/domains/{id}/ipinfo", a.domainIPInfo)
 	mux.HandleFunc("GET /api/domains/{id}/portscan", a.domainPortScan)
 	// Batch: all domains' fleet health in one response (cache-backed) — avoids N+1 fan-out.
@@ -314,7 +318,9 @@ func (a *crudAPI) siteInfoVM(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
-// domainInfo runs the DNS + cert + whois probe for a domain (Plane A; no credentials).
+// domainInfo runs the DNS + cert + whois probe for a domain (Plane A; no credentials). The probe
+// lands in the event journal (domain_probe): probe failures were invisible there during the
+// 2026-08-17 whois outage and diagnosing "why is it empty" required guessing.
 func (a *crudAPI) domainInfo(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
@@ -326,12 +332,56 @@ func (a *crudAPI) domainInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, _ := monitor.ProbeDomain(r.Context(), d.Name)
+	// Journal the probe outcome: whois/cert status snapshot in one detail line (whois errors
+	// truncated — the reason this event exists).
+	wh := info.Whois
+	whPart := "ok"
+	if wh.Error != "" {
+		whPart = truncateFor(wh.Error, 80)
+	} else if wh.Expiry != "" {
+		whPart = "expiry=" + wh.Expiry
+	}
+	certPart := "none"
+	if info.Cert.Present {
+		certPart = info.Cert.Status
+	}
+	_ = audit.Append(a.st.DB, a.logger, audit.Entry{
+		Plane: audit.PlaneA, Action: "domain_probe", Success: wh.Error == "",
+		TargetType: "domain", TargetID: strconv.FormatInt(id, 10),
+		Detail: "domain_id=" + strconv.FormatInt(id, 10) + " name=" + d.Name +
+			" whois=" + whPart + " cert=" + certPart,
+	})
 	writeJSON(w, http.StatusOK, info)
+}
+
+// truncateFor clips s to n runes.
+func truncateFor(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+// domainIntel returns the cached ip-info + port-scan for a domain (instant, no probe) plus the ISO
+// timestamps of when each was fetched. The UI shows this on domain open with a "refresh" button; the
+// expensive probes run only on explicit refresh.
+func (a *crudAPI) domainIntel(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	intel, err := a.st.GetDomainIntel(r.Context(), id)
+	if err != nil {
+		a.writeErr(w, "domainIntel", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, intel)
 }
 
 // domainIPInfo returns geo/ASN/PTR for each resolved A record of the domain (Plane A, keyless). A
 // domain may resolve to several IPs (round-robin / CDN); each is looked up via the keyless ipwho.is
-// endpoint, mirroring the VM "ip // info" panel.
+// endpoint, mirroring the VM "ip // info" panel. The result is cached (domain_intel) with a timestamp.
 func (a *crudAPI) domainIPInfo(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
@@ -353,11 +403,15 @@ func (a *crudAPI) domainIPInfo(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, entry)
 	}
+	// Persist + stamp so the domain detail can show it instantly next time without re-probing.
+	if blob, err := jsonMarshal(out); err == nil {
+		_ = a.st.SetDomainIPInfo(r.Context(), id, blob, nowISO())
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 // domainPortScan scans common TCP ports on the domain's primary resolved IP (Plane A, keyless) —
-// "what does this domain expose to the internet". Reuses the VM port scanner.
+// "what does this domain expose to the internet". Reuses the VM port scanner. Result cached + stamped.
 func (a *crudAPI) domainPortScan(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
@@ -375,13 +429,21 @@ func (a *crudAPI) domainPortScan(w http.ResponseWriter, r *http.Request) {
 	} else if len(info.DNS.AAAA) > 0 {
 		host = info.DNS.AAAA[0]
 	}
-	if host == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"host": "", "ports": []any{}})
-		return
+	res := map[string]any{"host": host, "ports": []any{}}
+	if host != "" {
+		res["ports"] = monitor.PortScan(r.Context(), host, 8*time.Second)
 	}
-	ports := monitor.PortScan(r.Context(), host, 8*time.Second)
-	writeJSON(w, http.StatusOK, map[string]any{"host": host, "ports": ports})
+	if blob, err := jsonMarshal(res); err == nil {
+		_ = a.st.SetDomainPortScan(r.Context(), id, blob, nowISO())
+	}
+	writeJSON(w, http.StatusOK, res)
 }
+
+// nowISO returns the current UTC time as an ISO-8601 string (for cache timestamps).
+func nowISO() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// jsonMarshal is a tiny helper so diagnostics.go doesn't import encoding/json at the top for two calls.
+func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
 
 // region FUNC_DomainHealth [DOMAIN(8): API; CONCEPT(8): Status; TECH(7): monitor]
 // @purpose Aggregate a domain's fleet-visible health from one probe: reachability (resolves to an
@@ -521,11 +583,12 @@ func (a *crudAPI) computeDomainHealth(ctx context.Context, id int64) (DomainHeal
 	if d.DNSLastSignature == "" {
 		_, _ = a.st.SetDomainDNSSignature(ctx, d.ID, sig)
 	}
+	// DNS change is INFORMATIONAL only — it does NOT color the fleet. It is inherently noisy
+	// (resolver differences, CDN rotation of control records, baseline staleness) and would leave a
+	// domain yellow forever with nothing the operator can act on. It is still surfaced via the
+	// dns_changed field (for the detail view + the opt-in DNS-change reminder) and its baseline is
+	// lazily set / explicitly acknowledged, but it never promotes the status.
 	dnsChanged := d.DNSLastSignature != "" && d.DNSLastSignature != sig
-	if dnsChanged {
-		promote("warn")
-		reasons = append(reasons, "dns control records changed (NS/MX/TXT)")
-	}
 
 	return DomainHealth{
 		Domain: d.Name, Status: status, Reasons: reasons, Reachable: reachable,

@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+
+
 /* region theme [DOMAIN(6): Design; CONCEPT(7]: Theming; TECH(7]: css-vars]
    Colors are space-separated RGB channels (consumed by tailwind.config.js as
    rgb(var(--token) / <alpha-value>)), so opacity modifiers keep working and a single `.light`
@@ -13,7 +15,7 @@
   --hud-panel: 12 17 13;
   --hud-panel2: 16 23 17;
   --hud-line: 28 42 32;
-  --hud-dim: 91 107 95;
+  --hud-dim: 120 138 127;
   --neon-green: 52 211 153;
   --neon-cyan: 34 211 238;
   --neon-amber: 251 191 36;

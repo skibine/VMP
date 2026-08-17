@@ -28,7 +28,20 @@ import (
 )
 
 // rdapBootstrapURL is the IANA RDAP bootstrap registry (suffix -> RDAP base URL).
-const rdapBootstrapURL = "https://data.iana.org/rdap/dns.json"
+var rdapBootstrapURL = "https://data.iana.org/rdap/dns.json"
+
+// rdapFallbackBase is the universal RDAP redirector used when the zone's official base fails
+// (dead base in the bootstrap, e.g. .top's rdap.nic.top, or registry port-43 IP blocks). Plain
+// HTTPS (443) — the only path that survives registries blocking a client IP. A var so tests can
+// point it at a fake server.
+var rdapFallbackBase = "https://rdap.org"
+
+// rdapClient carries a HARD timeout: http.DefaultClient has none, and a registry that ACCEPTS the
+// TCP connection and then stalls forever (verified: Identity Digital from some home IPs) hung the
+// goroutine indefinitely. Background callers (whois checks, domain warmer) run without deadlines,
+// so stalled requests piled up until socket exhaustion froze the whole server ("VMPulse завис").
+// A var so tests can shrink it.
+var rdapClient = &http.Client{Timeout: 8 * time.Second}
 
 var (
 	rdapCacheMu   sync.Mutex
@@ -120,13 +133,51 @@ func rdapLookup(ctx context.Context, domain string) (WhoisInfo, error) {
 	if base == "" {
 		return WhoisInfo{Status: "error", Error: "zone has no RDAP service"}, nil
 	}
+	return rdapFetch(ctx, base, domain)
+}
+
+// rdapLookupAny races the official bootstrap base and the universal redirector CONCURRENTLY and
+// takes the first answer with an expiry. Sequential fallback doubled the worst-case latency (a
+// stalling official server ate its whole 8s budget before the redirector even started); in
+// parallel the fastest healthy endpoint answers, and a stalled one costs nothing.
+func rdapLookupAny(ctx context.Context, domain string) (WhoisInfo, error) {
+	type res struct {
+		wi  WhoisInfo
+		err error
+	}
+	off := make(chan res, 1)
+	fb := make(chan res, 1)
+	go func() { wi, err := rdapLookup(ctx, domain); off <- res{wi, err} }()
+	go func() { wi, err := rdapFetch(ctx, rdapFallbackBase, domain); fb <- res{wi, err} }()
+	firstErr := error(nil)
+	for range 2 {
+		var r res
+		select {
+		case r = <-off:
+		case r = <-fb:
+		}
+		if r.err == nil && r.wi.Expiry != "" {
+			return r.wi, nil
+		}
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+	}
+	if firstErr != nil {
+		return WhoisInfo{}, firstErr
+	}
+	return WhoisInfo{Status: "error", Error: "rdap: no expiry from either endpoint"}, nil
+}
+
+// rdapFetch queries {base}/domain/{name} and parses the standard RDAP object.
+func rdapFetch(ctx context.Context, base, domain string) (WhoisInfo, error) {
 	url := strings.TrimSuffix(base, "/") + "/domain/" + domain
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return WhoisInfo{}, err
 	}
 	req.Header.Set("Accept", "application/rdap+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rdapClient.Do(req)
 	if err != nil {
 		return WhoisInfo{}, err
 	}

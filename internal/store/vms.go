@@ -29,6 +29,7 @@ func (s *Store) CreateVM(ctx context.Context, v VM) (int64, error) {
 	if err := v.Validate(); err != nil {
 		return 0, err
 	}
+	v.Kind = NormalizeVMKind(v.Kind)
 	// Assign the next stable ordinal (max+1). Never renumbered on delete (gaps are intentional).
 	var maxNo int
 	_ = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_no),0) FROM vms`).Scan(&maxNo)
@@ -36,12 +37,12 @@ func (s *Store) CreateVM(ctx context.Context, v VM) (int64, error) {
 INSERT INTO vms
 (name, display_no, hostname, ip, port_ssh, ssh_user, auth_type, provider, location_country, location_city,
  tags, group_id, notes, cost_monthly, currency, owner_user_id, agent_enabled, agent_port,
- prometheus_url, record_ssh_sessions, metrics_enabled, ai_enabled)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+ prometheus_url, record_ssh_sessions, metrics_enabled, ai_enabled, kind)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		v.Name, maxNo+1, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled))
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled), v.Kind)
 	if err != nil {
 		logging.LDD(s.logger, 10, "CreateVM", "INSERT_FAIL", err.Error())
 		return 0, fmt.Errorf("CreateVM: %w", err)
@@ -97,6 +98,7 @@ func (s *Store) ListVMs(ctx context.Context, includeArchived bool) ([]VM, error)
 // @complexity 5
 // endregion FUNC_UpdateVM
 func (s *Store) UpdateVM(ctx context.Context, v VM) error {
+	v.Kind = NormalizeVMKind(v.Kind)
 	if err := v.Validate(); err != nil {
 		return err
 	}
@@ -104,12 +106,12 @@ func (s *Store) UpdateVM(ctx context.Context, v VM) error {
 UPDATE vms SET name=?, hostname=?, ip=?, port_ssh=?, ssh_user=?, auth_type=?, provider=?,
  location_country=?, location_city=?, tags=?, group_id=?, notes=?, cost_monthly=?, currency=?,
  owner_user_id=?, agent_enabled=?, agent_port=?, prometheus_url=?, record_ssh_sessions=?, metrics_enabled=?,
- ai_enabled=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+ ai_enabled=?, kind=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id=?`,
 		v.Name, v.Hostname, v.IP, v.PortSSH, v.SSHUser, v.AuthType, v.Provider,
 		v.LocationCountry, v.LocationCity, marshalJSONcol(v.Tags), nullInt64(v.GroupID), v.Notes,
 		nullFloat64(v.CostMonthly), v.Currency, nullInt64(v.OwnerUserID), toBoolInt(v.AgentEnabled),
-		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled), v.ID)
+		nullInt(v.AgentPort), v.PrometheusURL, toBoolInt(v.RecordSSHSessions), toBoolInt(v.MetricsEnabled), toBoolInt(v.AIEnabled), v.Kind, v.ID)
 	if err != nil {
 		return fmt.Errorf("UpdateVM: %w", err)
 	}
@@ -181,7 +183,7 @@ func vmSelectCols() string {
 	return `SELECT id, name, display_no, hostname, ip, port_ssh, ssh_user, auth_type, provider,
  location_country, location_city, tags, group_id, notes, cost_monthly, currency,
  owner_user_id, agent_enabled, agent_port, prometheus_url, record_ssh_sessions, metrics_enabled,
- ai_enabled, created_at, updated_at, archived_at FROM vms`
+ ai_enabled, created_at, updated_at, archived_at, COALESCE(kind,'server') FROM vms`
 }
 
 // scanVM scans a VM from anything with Scan (both *sql.Row and *sql.Rows).
@@ -196,7 +198,7 @@ func scanVM(sc scanner) (VM, error) {
 		&v.ID, &v.Name, &v.DisplayNo, &v.Hostname, &v.IP, &v.PortSSH, &v.SSHUser, &v.AuthType, &v.Provider,
 		&v.LocationCountry, &v.LocationCity, &tags, &groupID, &v.Notes, &cost, &v.Currency,
 		&ownerID, &agentEnabled, &agentPort, &v.PrometheusURL, &recordSSH, &metricsEnabled,
-		&aiEnabled, &v.CreatedAt, &v.UpdatedAt, &archived)
+		&aiEnabled, &v.CreatedAt, &v.UpdatedAt, &archived, &v.Kind)
 	if err != nil {
 		return v, err
 	}

@@ -105,6 +105,7 @@ func fetchGeo(ctx context.Context, ip string, info *IPInfo) error {
 	var body struct {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
+		IP      string `json:"ip"` // ipwho.is echoes the queried IP (or the caller's when none given)
 		Country string `json:"country"`
 		Code    string `json:"country_code"`
 		Region  string `json:"region"`
@@ -126,6 +127,9 @@ func fetchGeo(ctx context.Context, ip string, info *IPInfo) error {
 	}
 	if !body.Success {
 		return fmt.Errorf("geo provider: %s", body.Message)
+	}
+	if info.IP == "" {
+		info.IP = body.IP // populate the caller's public IP when LookupIPInfo("") was used
 	}
 	info.GeoSource = "ipwho.is"
 	info.Country = body.Country

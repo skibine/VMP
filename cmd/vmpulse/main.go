@@ -14,6 +14,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,8 @@ import (
 	"syscall"
 	"time"
 
+	gossh "golang.org/x/crypto/ssh"
+
 	"github.com/skibine/vm-pulse/internal/ai"
 	"github.com/skibine/vm-pulse/internal/alerts"
 	"github.com/skibine/vm-pulse/internal/api"
@@ -30,11 +33,13 @@ import (
 	"github.com/skibine/vm-pulse/internal/auth"
 	"github.com/skibine/vm-pulse/internal/config"
 	"github.com/skibine/vm-pulse/internal/crypto"
+	"github.com/skibine/vm-pulse/internal/install"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/metrics"
 	"github.com/skibine/vm-pulse/internal/monitor"
 	"github.com/skibine/vm-pulse/internal/ssh"
 	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vm-pulse/internal/tgchat"
 	"golang.org/x/term"
 )
 
@@ -42,7 +47,19 @@ import (
 // @purpose Orchestrate startup and shutdown of a VM Pulse instance.
 // @complexity 5
 // endregion FUNC_main
+
+// Version is the build version stamp. Overridden at release via
+//   -ldflags "-X 'main.Version=<tag>-<sha>'"  (see Makefile). "dev" for local builds.
+var Version = "dev"
+
 func main() {
+	// Subcommand dispatch: `vmpulse doctor [--json]` runs the host self-audit and exits BEFORE the
+	// server bootstrap (no config/vault needed). Kept ahead of flag.Parse so server flags don't clash.
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		runDoctor(os.Args[2:])
+		return
+	}
+
 	configPath := flag.String("config", "config.yaml", "path to config.yaml")
 	reset2FA := flag.String("reset-2fa", "", "BREAK-GLASS: disable 2FA for the given username and exit (run on the box if locked out)")
 	askPass := flag.Bool("ask-passphrase", false, "prompt for the vault master passphrase at startup (hidden input) instead of reading it from config/env")
@@ -158,6 +175,7 @@ func main() {
 	alerts.NewDomainEvaluator(s, alerts.DefaultRegistry(logger), domainProbe, logger, 6*time.Hour).Start(ctx)
 	defer ev.Stop()
 
+	api.Version = Version // propagate the build stamp BEFORE New() (New captures it into Server.Version)
 	server := api.New(s, cfg.Listen, logger)
 	// Plane B: deny-by-default auth on /api/ (healthz + login stay public).
 	server.Use(auth.Middleware(s, logger))
@@ -167,8 +185,23 @@ func main() {
 	seedAI(ctx, s, cfg, logger)
 	// AI executor wraps the SSH dialer so approved (or auto-approved) commands can run on VMs.
 	sshDialer := ssh.New(s, logger)
-	aiRegistry := ai.NewRegistry(append(append(ai.StoreTools(s), ai.HostProbeTools()...), ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
-	server.WithAgent(&ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger})
+	vmReader := &sshVMReader{dialer: sshDialer, st: s}
+	aiRegistry := ai.NewRegistry(append(append(append(append(append(append(append(
+		ai.StoreTools(s), ai.HostProbeTools()...),
+		ai.DomainTools(s)...),
+		ai.AlertTools(s)...),
+		ai.VMTools(s, vmReader)...),
+		ai.CheckTools(s)...),
+		ai.FleetMutators(s)...),
+		ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
+	agent := &ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger}
+	server.WithAgent(agent)
+
+	// Telegram chat bridge: the SAME agent as a chat frontend (opt-in per telegram channel via
+	// the agent_chat_enabled config flag). Long-poll based — works behind NAT, no inbound ports;
+	// proposed commands surface back in the chat as ✅/❌ buttons resolved through the shared
+	// approve-path. Runs until ctx is cancelled.
+	go (&tgchat.Manager{Store: s, Agent: agent, Approver: server, Logger: logger}).Run(ctx)
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
 	// records CPU/RAM/disk/load samples; hourly downsampling (§5.2). Runs until ctx is cancelled.
@@ -215,6 +248,55 @@ func (e *sshActionExec) Execute(ctx context.Context, vmID int64, command string)
 	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return e.dialer.RunCommand(rctx, client, command, sudoPassword)
+}
+
+// sshVMReader adapts the SSH dialer to the ai.VMDataReader interface (snapshot/errors/updates/
+// inventory/vhosts reads for the agent's SSH tools). Same credential path as the web UI readers.
+type sshVMReader struct {
+	dialer *ssh.Dialer
+	st     *store.Store
+}
+
+func (r *sshVMReader) dial(ctx context.Context, vmID int64, fn func(c *gossh.Client) (any, error)) (any, error) {
+	client, _, derr := r.dialer.Dial(ctx, vmID)
+	if derr != nil {
+		return map[string]any{"error": "dial failed", "detail": derr.Error()}, nil
+	}
+	defer client.Close()
+	return fn(client)
+}
+
+func (r *sshVMReader) Snapshot(ctx context.Context, vmID int64) (any, error) {
+	return r.dial(ctx, vmID, func(c *gossh.Client) (any, error) { return r.dialer.Snapshot(ctx, c) })
+}
+
+func (r *sshVMReader) Errors(ctx context.Context, vmID int64, window string) (any, error) {
+	var sudoPassword string
+	if creds, ok, _ := r.st.GetVMCredentials(ctx, vmID); ok {
+		sudoPassword = creds.SudoPassword
+	}
+	return r.dial(ctx, vmID, func(c *gossh.Client) (any, error) { return r.dialer.RecentErrors(ctx, c, window, sudoPassword) })
+}
+
+func (r *sshVMReader) Updates(ctx context.Context, vmID int64) (any, error) {
+	return r.dial(ctx, vmID, func(c *gossh.Client) (any, error) { return r.dialer.Updates(ctx, c) })
+}
+
+func (r *sshVMReader) InventoryRefresh(ctx context.Context, vmID int64) (any, error) {
+	out, err := r.dial(ctx, vmID, func(c *gossh.Client) (any, error) { return r.dialer.Inventory(ctx, c) })
+	if err != nil {
+		return out, err
+	}
+	if inv, ok := out.(ssh.Inventory); ok {
+		if blob, merr := json.Marshal(inv); merr == nil {
+			_ = r.st.SetVMInventory(ctx, vmID, string(blob))
+		}
+	}
+	return out, nil
+}
+
+func (r *sshVMReader) VHosts(ctx context.Context, vmID int64) (any, error) {
+	return r.dial(ctx, vmID, func(c *gossh.Client) (any, error) { return r.dialer.VHosts(ctx, c) })
 }
 
 // region FUNC_parseLevel [DOMAIN(7): Config; CONCEPT(5): LogLevel; TECH(4): slog]
@@ -446,4 +528,40 @@ func seedAI(ctx context.Context, s *store.Store, cfg *config.Config, logger *slo
 		return
 	}
 	logging.LDD(logger, 9, "main", "AI_SEEDED", "migrated ai.* from config to settings store")
+}
+
+// region FUNC_runDoctor [DOMAIN(8): Entry; CONCEPT(8): HostAudit; TECH(6): cli]
+// @purpose `vmpulse doctor [--json]` — run the host self-audit and print the verdict, then exit.
+// @purpose No config/vault needed; this is the install-time / standalone posture check.
+// @complexity 3
+// endregion FUNC_runDoctor
+func runDoctor(args []string) {
+	asJSON := false
+	for _, a := range args {
+		if a == "--json" || a == "-j" {
+			asJSON = true
+		}
+		if a == "-h" || a == "--help" {
+			fmt.Println("usage: vmpulse doctor [--json]\n\nRun a read-only host security audit and print the risk verdict.")
+			return
+		}
+	}
+	// Logs go to stderr so the human report (and --json) on stdout stays clean.
+	logger := logging.Setup(parseLevel("warn"), os.Stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	rep := install.Audit(ctx, logger)
+	if asJSON {
+		b, err := install.MarshalJSONReport(rep)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "doctor: marshal:", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(b))
+		return
+	}
+	install.WriteText(os.Stdout, rep)
+	if rep.Verdict.Severity == "critical" {
+		os.Exit(2) // non-zero so installers/wizards can gate on a critical host
+	}
 }

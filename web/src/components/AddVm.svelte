@@ -9,6 +9,7 @@
   let host = ''
   let error = ''
   let busy = false
+  let kind = 'server'
 
   async function submit() {
     error = ''
@@ -21,7 +22,8 @@
         name: name.trim(),
         hostname: host.trim(),
         ip: /^\d{1,3}(\.\d{1,3}){3}$/.test(host.trim()) ? host.trim() : '',
-        port_ssh: 22
+        port_ssh: 22,
+        kind
       })
       // The backend auto-provisions a system liveness check (composite ping/ssh/web/tls) that
       // drives the fleet status dot — no need to create a check here.
@@ -42,6 +44,13 @@
   <label class="block space-y-1">
     <span class="hud-label">{$t('addvm.host')}</span>
     <input class="hud-input w-full font-mono" bind:value={host} placeholder="example.com or 10.0.0.1" />
+  </label>
+  <label class="block space-y-1">
+    <span class="hud-label">{$t('addvm.kind')}</span>
+    <select class="hud-input w-full" bind:value={kind}>
+      <option value="server">{$t('vmk.server')}</option>
+      <option value="equipment">{$t('vmk.equipment')}</option>
+    </select>
   </label>
   {#if error}
     <div class="text-xs text-neon-red font-mono border border-neon-red/30 rounded px-2 py-1.5 bg-neon-red/5">

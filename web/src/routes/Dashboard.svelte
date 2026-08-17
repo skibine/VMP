@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
-  import { user, logout as doLogout, themeLight, toggleTheme, gotoSettings } from '../lib/stores.js'
+  import { user, logout as doLogout, themeLight, toggleTheme, gotoSettings, appVersion } from '../lib/stores.js'
   import { t, setLocale, locale, initLocaleFromServer } from '../lib/i18n.js'
   import VmList from '../components/VmList.svelte'
   import VmDetail from '../components/VmDetail.svelte'
@@ -10,6 +10,7 @@
   import Notifications from '../components/Notifications.svelte'
   import ChatPanel from '../components/ChatPanel.svelte'
   import Settings from './Settings.svelte'
+  import Events from './Events.svelte'
 
   let view = 'fleet' // 'fleet' | 'alerts' | 'settings'  (domains merged into the fleet)
   // Unified selection: null = fleet overview; 'vm' = a VM; 'domain' = a domain.
@@ -49,6 +50,7 @@
   let gotoUnsub
   onMount(() => {
     initLocaleFromServer()
+    api.version().then((v) => { if (v && v.version) appVersion.set(v.version) }).catch(() => {})
     gotoUnsub = gotoSettings.subscribe((v) => { if (v) { view = 'settings'; gotoSettings.set(false) } })
   })
   onDestroy(() => gotoUnsub && gotoUnsub())
@@ -58,9 +60,10 @@
 
 <div class="h-full flex flex-col overflow-hidden">
   <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0 relative z-10">
-    <div class="hud-label">// VM&nbsp;PULSE</div>
+    <div class="hud-label">// VM&nbsp;PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
     <div class="flex items-center gap-1">
       <button class="hud-btn {view === 'fleet' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'fleet')}>{$t('nav.fleet')}</button>
+      <button class="hud-btn {view === 'events' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'events')}>{$t('nav.events')}</button>
       <button class="hud-btn {view === 'settings' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'settings')}>{$t('nav.settings')}</button>
     </div>
     <div class="ml-auto flex items-center gap-4">
@@ -98,6 +101,15 @@
       <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px">
         <ChatPanel />
       </aside>
+    </main>
+  {:else if view === 'events'}
+    <main class="flex-1 flex min-h-0 overflow-hidden">
+      <section class="overflow-auto hud-grid flex-1"><Events /></section>
+      <div
+        class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
+        role="separator" aria-orientation="vertical" on:mousedown={startDrag} title="drag to resize chat"
+      ></div>
+      <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px"><ChatPanel /></aside>
     </main>
   {:else}
     <main class="flex-1 flex min-h-0 overflow-hidden">

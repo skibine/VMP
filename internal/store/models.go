@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"net"
 )
 
 // region STRUCT_ValidationError [DOMAIN(7): Validation; CONCEPT(6): Error; TECH(5): struct]
@@ -61,6 +62,7 @@ type VM struct {
 	PrometheusURL     string   `json:"prometheus_url"`
 	RecordSSHSessions bool     `json:"record_ssh_sessions"`
 	MetricsEnabled    bool     `json:"metrics_enabled"`
+	Kind              string   `json:"kind"` // server (default) | equipment (router, camera, web panel, any non-server host)
 	AIEnabled         bool     `json:"ai_enabled"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
@@ -83,6 +85,9 @@ func (v VM) Validate() error {
 	}
 	if v.PortSSH < 1 || v.PortSSH > 65535 {
 		return ValidationError{Field: "port_ssh", Reason: "must be in 1..65535"}
+	}
+	if !ValidVMKind(v.Kind) {
+		return ValidationError{Field: "kind", Reason: "must be server or equipment"}
 	}
 	return nil
 }
@@ -192,7 +197,27 @@ func (d Domain) Validate() error {
 	if strings.TrimSpace(d.Name) == "" {
 		return ValidationError{Field: "name", Reason: "required"}
 	}
+	// BUG_FIX_CONTEXT: a bare IP used to be accepted as a "domain" (the operator added a router
+	// IP), where whois/dns checks are meaningless. Reject with an actionable message — an IP is
+	// monitored as a VM (kind network/iot/web), not a domain.
+	if net.ParseIP(strings.TrimSpace(d.Name)) != nil {
+		return ValidationError{Field: "name", Reason: "это IP-адрес — добавьте его как ВПС/оборудование, а не домен (IPs belong in a VM of kind equipment, not domains)"}
+	}
 	return nil
+}
+
+// validVMKinds is the closed set of VM kinds: a host is either a server or equipment.
+var validVMKinds = map[string]bool{"server": true, "equipment": true}
+
+// ValidVMKind reports whether k is a valid kind; empty is valid too (normalizes to server).
+func ValidVMKind(k string) bool { return k == "" || validVMKinds[k] }
+
+// NormalizeVMKind maps "" -> "server" (the default kind everywhere a VM enters the system).
+func NormalizeVMKind(k string) string {
+	if k == "" {
+		return "server"
+	}
+	return k
 }
 
 // marshalJSONcol serializes a value to a TEXT column. nil maps/slices become "{}"/"[]".

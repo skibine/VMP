@@ -225,6 +225,7 @@
           <div class="flex items-center gap-2">
             <span class="h-2.5 w-2.5 rounded-full shrink-0 {lampClass(st)}" title={$t(verdictKey(st))}></span>
             <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
+            {#if vm.kind && vm.kind !== 'server'}<span class="text-[9px] font-mono px-1 rounded border border-neon-amber/40 text-neon-amber shrink-0" title={vm.kind}>{$t('vmk.equipment')}</span>{/if}
             <span class="font-mono text-sm text-emerald-100 truncate flex-1">{vm.name}</span>
             {#if vm.has_creds}<Lock size={12} cls="text-neon-amber/80 shrink-0" title={$t('vd.credsSet')} />{/if}
             {#if alertedIds.has(vm.id)}<Bell size={13} cls="text-neon-green shrink-0" title={$t('list.alertOn')} />{/if}

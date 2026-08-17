@@ -14,6 +14,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -221,4 +222,79 @@ func scanDomain(sc scanner) (Domain, error) {
 // isUniqueViolation detects a UNIQUE constraint failure across the modernc driver.
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
+}
+
+// region DomainIntel [DOMAIN(8): Domains; CONCEPT(7): Cache; TECH(6): sqlite,json]
+// DomainIntel is the cached "ip // info" + "port // scan" result for a domain, with ISO timestamps
+// of when each was fetched. Shown instantly on domain open; refreshed on demand. The blobs are
+// parsed into `any` (not json.RawMessage) so the API encoder marshals them cleanly with no
+// RawMessage-validity quirk.
+// endregion DomainIntel
+type DomainIntel struct {
+	IPInfo     any    `json:"ipinfo"`
+	IPInfoAt   string `json:"ipinfo_at"`
+	PortScan   any    `json:"portscan"`
+	PortScanAt string `json:"portscan_at"`
+}
+
+// GetDomainIntel returns the cached intel for a domain (nil fields if never probed).
+func (s *Store) GetDomainIntel(ctx context.Context, domainID int64) (DomainIntel, error) {
+	var ip, ipa, ps, psa sql.NullString
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT ipinfo, ipinfo_at, portscan, portscan_at FROM domain_intel WHERE domain_id=?`, domainID,
+	).Scan(&ip, &ipa, &ps, &psa)
+	if err == sql.ErrNoRows {
+		return DomainIntel{}, nil
+	}
+	if err != nil {
+		return DomainIntel{}, fmt.Errorf("GetDomainIntel: %w", err)
+	}
+	d := DomainIntel{IPInfoAt: ipa.String, PortScanAt: psa.String}
+	// Parse the cached JSON blobs into generic values (best-effort: a malformed blob => nil).
+	if v := orEmpty(ip); v != "" {
+		var parsed any
+		if e := json.Unmarshal([]byte(v), &parsed); e == nil {
+			d.IPInfo = parsed
+		}
+	}
+	if v := orEmpty(ps); v != "" {
+		var parsed any
+		if e := json.Unmarshal([]byte(v), &parsed); e == nil {
+			d.PortScan = parsed
+		}
+	}
+	return d, nil
+}
+
+// SetDomainIPInfo upserts the cached ip-info blob + its fetch timestamp.
+func (s *Store) SetDomainIPInfo(ctx context.Context, domainID int64, blob []byte, at string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO domain_intel (domain_id, ipinfo, ipinfo_at, portscan, portscan_at)
+		 VALUES (?, ?, ?, '', '')
+		 ON CONFLICT(domain_id) DO UPDATE SET ipinfo=excluded.ipinfo, ipinfo_at=excluded.ipinfo_at`,
+		domainID, string(blob), at)
+	if err != nil {
+		return fmt.Errorf("SetDomainIPInfo: %w", err)
+	}
+	return nil
+}
+
+// SetDomainPortScan upserts the cached port-scan blob + its fetch timestamp.
+func (s *Store) SetDomainPortScan(ctx context.Context, domainID int64, blob []byte, at string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO domain_intel (domain_id, ipinfo, ipinfo_at, portscan, portscan_at)
+		 VALUES (?, '', '', ?, ?)
+		 ON CONFLICT(domain_id) DO UPDATE SET portscan=excluded.portscan, portscan_at=excluded.portscan_at`,
+		domainID, string(blob), at)
+	if err != nil {
+		return fmt.Errorf("SetDomainPortScan: %w", err)
+	}
+	return nil
+}
+
+func orEmpty(n sql.NullString) string {
+	if n.Valid {
+		return n.String
+	}
+	return ""
 }

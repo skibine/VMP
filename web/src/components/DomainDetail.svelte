@@ -3,6 +3,7 @@
   // Per-domain detail shown in the fleet main area when a domain is selected (DNS + cert expiry +
   // whois registration). Auto-probes on domainId change; re-probe + delete inline.
   import { createEventDispatcher } from 'svelte'
+  import { get } from 'svelte/store'
   import { api } from '../lib/api.js'
   import { t } from '../lib/i18n.js'
 
@@ -23,7 +24,7 @@
   let dhealth = null // domain fleet health {status, reasons, dns_changed}
   let dnsAck = false
 
-  $: if (domainId != null) { probe(domainId); loadReminders(domainId); loadHealth(domainId); dipinfo = null; dports = null }
+  $: if (domainId != null) { dipinfo = null; dipAt = ''; dports = null; dportAt = ''; probe(domainId); loadReminders(domainId); loadHealth(domainId); loadIntel(domainId) }
 
   async function loadHealth(id) {
     dnsAck = false
@@ -110,18 +111,47 @@
   }
 
   // Domain IP intel (geo/ASN/PTR per resolved A) + port scan of the primary IP — Plane A, keyless.
-  // Loaded on demand (button) to avoid probing every domain on detail open.
-  let dipinfo = null // [{ip, info:{country,city,country_code,asn,org,reverse,...}}]
+  // Cached in domain_intel with a fetch timestamp: shown INSTANTLY on domain open (no 30-40s wait),
+  // refreshed on demand. The probe endpoints persist their result + stamp on every call.
+  let dipinfo = null // [{ip, info:{...}}]
+  let dipAt = '' // ISO timestamp of last ip-info fetch
   let dipBusy = false
-  let dports = null // {host, ports:[{port,name,open}]}
+  let dports = null // {host, ports:[{port,service,open}]}
+  let dportAt = '' // ISO timestamp of last port-scan fetch
   let dportBusy = false
+  // Load the cached intel instantly on open (empty if never probed). The API returns ipinfo as a
+  // parsed array and portscan as a parsed object (NOT strings) — assign directly, do not re-parse.
+  async function loadIntel(id) {
+    try {
+      const c = await api.domainIntel(id)
+      if (Array.isArray(c.ipinfo) && c.ipinfo.length) { dipinfo = c.ipinfo; dipAt = c.ipinfo_at || '' }
+      if (c.portscan && typeof c.portscan === 'object') { dports = c.portscan; dportAt = c.portscan_at || '' }
+    } catch (_) { /* keep empty */ }
+  }
+  // ago(iso) -> "2 ч назад" / "3 д назад" / "" — humanized cache age.
+  // NOTE: do NOT name the local timestamp `t` — it would shadow the imported i18n store `t`,
+  // breaking get(t) (subscribe on a Number => crash on any domain that has cached intel).
+  function ago(iso) {
+    if (!iso) return ''
+    const ts = new Date(iso).getTime()
+    if (!ts) return ''
+    const m = Math.round((Date.now() - ts) / 60000)
+    const tr = get(t) // $t can't be used inside a function; read the store value explicitly
+    if (m < 1) return tr('dom.justNow')
+    if (m < 60) return tr('dom.minAgo', { n: m })
+    const h = Math.round(m / 60)
+    if (h < 24) return tr('dom.hourAgo', { n: h })
+    return tr('dom.dayAgo', { n: Math.round(h / 24) })
+  }
   async function loadIPInfo(id) {
     dipBusy = true
-    try { dipinfo = await api.domainIPInfo(id) } catch (_) { dipinfo = [] } finally { dipBusy = false }
+    try { const r = await api.domainIPInfo(id); dipinfo = r; dipAt = new Date().toISOString() }
+    catch (e) { dipinfo = []; console.error('[DomainDetail] ipinfo failed:', e) } finally { dipBusy = false }
   }
   async function loadPorts(id) {
     dportBusy = true
-    try { dports = await api.domainPortScan(id) } catch (_) { dports = { host: '', ports: [] } } finally { dportBusy = false }
+    try { const r = await api.domainPortScan(id); dports = r; dportAt = new Date().toISOString() }
+    catch (e) { dports = { host: '', ports: [] }; console.error('[DomainDetail] portscan failed:', e) } finally { dportBusy = false }
   }
 
   async function remove() {
@@ -164,10 +194,7 @@
     </div>
   </div>
 
-  <section class="hud-panel p-2.5 space-y-2">
-    <div class="flex items-center gap-2">
-      <span class="hud-label text-neon-cyan">{$t('dom.info')}</span>
-    </div>
+  <div class="space-y-2.5">
     {#if infoBusy}
       <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('dom.probing')}</div>
     {:else if err}
@@ -178,8 +205,8 @@
       <div class="text-[10px] text-hud-dim font-mono leading-relaxed">{$t('dom.remindersHint')}</div>
       {#if !channels.length}<div class="text-[10px] text-hud-dim font-mono">{$t('dom.noChannelHint')}</div>{/if}
       <!-- Certificate -->
-      <div>
-        <div class="hud-label inline-block mb-1 px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.cert')}</div>
+      <section class="hud-panel p-2.5 space-y-2">
+        <div class="hud-label inline-block px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.cert')}</div>
         {#if info.cert?.present}
           <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
             <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">issuer</span> {info.cert.issuer || '—'}</div>
@@ -204,10 +231,10 @@
           <select class="hud-input !py-0.5 !text-xs w-36" bind:value={certAdd.repeat} title={$t('dom.repeat')}>{#each repeatOptions as o}<option value={o.v}>{o.l}</option>{/each}</select>
           <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px] shrink-0" on:click={() => addReminder('cert')} disabled={reminderBusy || !certDaysOk} title={!certDaysOk ? $t('dom.daysRequired') : ''}>{$t('dom.add')}</button>
         </div>
-      </div>
+      </section>
       <!-- DNS records -->
-      <div>
-        <div class="hud-label inline-block mb-1 px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.dns')}</div>
+      <section class="hud-panel p-2.5 space-y-2">
+        <div class="hud-label inline-block px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.dns')}</div>
         <div class="text-xs font-mono space-y-0.5">
           {#if info.dns?.a?.length}<div><span class="hud-label text-hud-dim">a</span> <span class="text-emerald-200/80">{info.dns.a.join(', ')}</span></div>{/if}
           {#if info.dns?.aaaa?.length}<div><span class="hud-label text-hud-dim">aaaa</span> <span class="text-emerald-200/80">{info.dns.aaaa.join(', ')}</span></div>{/if}
@@ -228,10 +255,10 @@
           <select class="hud-input !py-0.5 !text-xs w-40" bind:value={dnsAdd.chan}>{#each channelOpts as o}<option value={o.id}>{o.label}</option>{/each}</select>
           <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px] shrink-0" on:click={() => addReminder('dns')} disabled={reminderBusy}>{$t('dom.add')}</button>
         </div>
-      </div>
+      </section>
       <!-- Whois -->
-      <div>
-        <div class="hud-label inline-block mb-1 px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.whois')}</div>
+      <section class="hud-panel p-2.5 space-y-2">
+        <div class="hud-label inline-block px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.whois')}</div>
         <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
           <div class="min-w-0 break-words"><span class="hud-label text-hud-dim">registrar</span> {info.whois?.registrar || '—'}</div>
           <div><span class="hud-label text-hud-dim">created</span> {info.whois?.created || '—'}</div>
@@ -239,6 +266,7 @@
           <div><span class="hud-label text-hud-dim">{$t('vd.status')}</span> {info.whois?.status || '—'}</div>
         </div>
         {#if info.whois?.error}<div class="text-[11px] font-mono text-neon-amber mt-1">{info.whois.error}</div>{/if}
+        {#if info.whois?.note}<div class="text-[11px] font-mono text-hud-dim mt-1">{info.whois.note}</div>{/if}
         {#if ownerRems.length}
           <div class="flex flex-wrap gap-1 mt-1">
             {#each ownerRems as r (r.id)}
@@ -253,12 +281,16 @@
           <select class="hud-input !py-0.5 !text-xs w-36" bind:value={ownerAdd.repeat} title={$t('dom.repeat')}>{#each repeatOptions as o}<option value={o.v}>{o.l}</option>{/each}</select>
           <button class="hud-btn hud-btn-primary !py-0.5 !text-[10px] shrink-0" on:click={() => addReminder('owner')} disabled={reminderBusy || !ownerDaysOk} title={!ownerDaysOk ? $t('dom.daysRequired') : ''}>{$t('dom.add')}</button>
         </div>
-      </div>
+      </section>
       <!-- IP // инфо (geo/ASN/PTR per resolved A) -->
-      <div>
-        <div class="flex items-center gap-2 mb-1">
+      <section class="hud-panel p-2.5 space-y-2">
+        <div class="flex items-center gap-2">
           <span class="hud-label inline-block px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.ipInfo')}</span>
-          <button class="hud-btn !py-0.5 !px-2 !text-[10px] ml-auto" on:click={() => loadIPInfo(domainId)} disabled={dipBusy}>{dipBusy ? '…' : $t('dom.ipInfoGo')}</button>
+          {#if dipAt}<span class="text-[10px] text-hud-dim font-mono ml-1">{ago(dipAt)}</span>{/if}
+          <div class="ml-auto flex items-center gap-2">
+            {#if dipBusy}<span class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('dom.ipinfoBusy')}</span>{/if}
+            <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => loadIPInfo(domainId)} disabled={dipBusy}>{dipBusy ? '…' : $t('dom.ipInfoGo')}</button>
+          </div>
         </div>
         {#if dipinfo}
           {#if dipinfo.length}
@@ -274,12 +306,16 @@
             <div class="text-[11px] text-hud-dim font-mono">{$t('dom.noIp')}</div>
           {/if}
         {/if}
-      </div>
+      </section>
       <!-- порт // скан (common ports on the primary resolved IP) -->
-      <div>
-        <div class="flex items-center gap-2 mb-1">
+      <section class="hud-panel p-2.5 space-y-2">
+        <div class="flex items-center gap-2">
           <span class="hud-label inline-block px-2 py-0.5 rounded text-white" style="background:#E6541C">{$t('dom.ports')}</span>
-          <button class="hud-btn !py-0.5 !px-2 !text-[10px] ml-auto" on:click={() => loadPorts(domainId)} disabled={dportBusy}>{dportBusy ? '…' : $t('dom.portsGo')}</button>
+          {#if dportAt}<span class="text-[10px] text-hud-dim font-mono ml-1">{ago(dportAt)}</span>{/if}
+          <div class="ml-auto flex items-center gap-2">
+            {#if dportBusy}<span class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('dom.portBusy')}</span>{/if}
+            <button class="hud-btn !py-0.5 !px-2 !text-[10px]" on:click={() => loadPorts(domainId)} disabled={dportBusy}>{dportBusy ? '…' : $t('dom.portsGo')}</button>
+          </div>
         </div>
         {#if dports}
           {@const open = (dports.ports || []).filter((p) => p.open)}
@@ -291,11 +327,11 @@
             <div class="text-[11px] text-hud-dim font-mono">{#if dports.host}{$t('dom.noPorts')}{:else}{$t('dom.noIp')}{/if}</div>
           {/if}
         {/if}
-      </div>
+      </section>
     {:else}
-      <div class="hud-label text-hud-dim">{$t('dom.empty')}</div>
+      <section class="hud-panel p-2.5"><div class="hud-label text-hud-dim">{$t('dom.empty')}</div></section>
     {/if}
-  </section>
+  </div>
 
   {#if reminderMsg}<div class="px-1 text-[11px] font-mono text-neon-green">{reminderMsg}</div>{/if}
 </div>

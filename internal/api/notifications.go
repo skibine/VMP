@@ -25,8 +25,56 @@ import (
 // endregion FUNC_registerNotifications
 func registerNotifications(mux *http.ServeMux, a *crudAPI) {
 	mux.HandleFunc("GET /api/notifications", a.listNotifications)
+	mux.HandleFunc("GET /api/notifications/all", a.listAllNotifications)
 	mux.HandleFunc("POST /api/notifications/{id}/read", a.markNotificationRead)
 	mux.HandleFunc("POST /api/notifications/read-all", a.markAllNotificationsRead)
+	mux.HandleFunc("DELETE /api/notifications", a.deleteNotifications)
+}
+
+// region FUNC_listAllNotifications [DOMAIN(7): Alerting; CONCEPT(7): ReadHistory; TECH(6): net/http]
+// @purpose Paged + filtered notification history for the bell modal ("show all"): ?page,
+//
+//	?page_size (max 200), ?kind (alert|reminder|test), ?unread=1. Returns {items,total,page,page_size}.
+//	(The plain GET /api/notifications keeps its legacy array shape for the dropdown.)
+//
+// @complexity 4
+// endregion FUNC_listAllNotifications
+func (a *crudAPI) listAllNotifications(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := max(1, atoiDefault(q.Get("page"), 1))
+	size := clampInt(atoiDefault(q.Get("page_size"), 50), 1, 200)
+	ns, count, err := a.st.ListNotificationsFiltered(r.Context(), store.NotificationFilter{
+		UnreadOnly: q.Get("unread") == "1",
+		Kind:       q.Get("kind"),
+		Limit:      size, Offset: (page - 1) * size,
+	})
+	if err != nil {
+		a.writeErr(w, "listAllNotifications", err)
+		return
+	}
+	if ns == nil {
+		ns = []store.Notification{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": ns, "total": count, "page": page, "page_size": size,
+	})
+}
+
+// region FUNC_deleteNotifications [DOMAIN(7): Alerting; CONCEPT(6): Purge; TECH(5): net/http]
+// @purpose DELETE /api/notifications?scope=read|all (default read) — the modal's clear buttons.
+//
+//	Deleting read rows executes their one-shot reminders (same semantics as reading them).
+//
+// @complexity 3
+// endregion FUNC_deleteNotifications
+func (a *crudAPI) deleteNotifications(w http.ResponseWriter, r *http.Request) {
+	all := r.URL.Query().Get("scope") == "all"
+	deleted, err := a.st.DeleteNotifications(r.Context(), all)
+	if err != nil {
+		a.writeErr(w, "deleteNotifications", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "cleared", "deleted": deleted})
 }
 
 // region FUNC_listNotifications [DOMAIN(7): Alerting; CONCEPT(6): Read; TECH(5]: net/http]

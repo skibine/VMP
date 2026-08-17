@@ -151,3 +151,99 @@ func (s *Store) DeleteOneShotReminderForNotification(ctx context.Context, notifI
 	}
 	return true, nil
 }
+
+// NotificationFilter drives ListNotificationsFiltered (the "show all notifications" modal).
+type NotificationFilter struct {
+	UnreadOnly bool
+	Kind       string // alert | reminder | test | "" = all
+	Limit      int
+	Offset     int
+}
+
+// region FUNC_ListNotificationsFiltered [DOMAIN(7): Alerting; CONCEPT(6): ReadHistory; TECH(6): database/sql]
+// @purpose Paged notification HISTORY for the bell modal: created_at DESC (no "unread first" —
+//
+//	this is a browsable log, not an inbox), with unread/kind filters and a total count.
+//
+// @complexity 4
+// endregion FUNC_ListNotificationsFiltered
+func (s *Store) ListNotificationsFiltered(ctx context.Context, f NotificationFilter) ([]Notification, int, error) {
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
+	where := " WHERE 1=1"
+	var args []any
+	if f.UnreadOnly {
+		where += " AND read_at IS NULL"
+	}
+	if f.Kind != "" {
+		where += " AND kind = ?"
+		args = append(args, f.Kind)
+	}
+	var total int
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM notifications"+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("ListNotificationsFiltered count: %w", err)
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT id, title, body, kind, ref_id, created_at, COALESCE(read_at,'')
+FROM notifications`+where+` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		append(args, f.Limit, f.Offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ListNotificationsFiltered: %w", err)
+	}
+	defer rows.Close()
+	var out []Notification
+	for rows.Next() {
+		var n Notification
+		var refID sql.NullInt64
+		var read string
+		if err := rows.Scan(&n.ID, &n.Title, &n.Body, &n.Kind, &refID, &n.CreatedAt, &read); err != nil {
+			return nil, 0, fmt.Errorf("ListNotificationsFiltered scan: %w", err)
+		}
+		n.RefID = toInt64Ptr(refID)
+		n.ReadAt = read
+		out = append(out, n)
+	}
+	return out, total, rows.Err()
+}
+
+// region FUNC_DeleteNotifications [DOMAIN(7): Alerting; CONCEPT(6): Purge; TECH(5): database/sql]
+// @purpose Bulk-delete notifications: all=false -> only READ ones (unread stay; the safe default
+//
+//	of the modal's "clear read"), all=true -> everything. One-shot reminders behind deleted
+//	notifications are executed (dropped) first — same semantics as reading them.
+//
+// @complexity 4
+// endregion FUNC_DeleteNotifications
+func (s *Store) DeleteNotifications(ctx context.Context, all bool) (int64, error) {
+	// Execute one-shot reminders behind the rows being deleted (best-effort, idempotent).
+	var ids []int64
+	sel := `SELECT id FROM notifications WHERE kind='reminder' AND ref_id IS NOT NULL`
+	if !all {
+		sel += ` AND read_at IS NOT NULL`
+	}
+	rows, err := s.DB.QueryContext(ctx, sel)
+	if err == nil {
+		for rows.Next() {
+			var id int64
+			if _ = rows.Scan(&id); true {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+	}
+	for _, id := range ids {
+		_, _ = s.DeleteOneShotReminderForNotification(ctx, id)
+	}
+	q := `DELETE FROM notifications`
+	if !all {
+		q += ` WHERE read_at IS NOT NULL`
+	}
+	res, err := s.DB.ExecContext(ctx, q)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteNotifications: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	logging.LDD(s.logger, 8, "DeleteNotifications", "DELETED", fmt.Sprintf("rows=%d all=%v", n, all))
+	return n, nil
+}

@@ -80,6 +80,7 @@ func RegisterCRUD(mux *http.ServeMux, st *store.Store, logger *slog.Logger) *cru
 
 	// Alerts: rules, channels, fired alerts.
 	registerAlerts(mux, a)
+	registerAudit(mux, a)
 
 	// Settings: AI provider config + VM credentials.
 	registerSettings(mux, a)
@@ -173,6 +174,7 @@ func (a *crudAPI) createVM(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.st.EnsureSystemLiveness(r.Context(), id, port)
 	_ = a.st.EnsureSystemExposures(r.Context(), id)
+	a.auditConfig("vm_create", id, "vm="+strconv.FormatInt(id, 10)+" name="+v.Name)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
@@ -227,6 +229,7 @@ func (a *crudAPI) archiveVM(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "archiveVM", err)
 		return
 	}
+	a.auditConfig("vm_archive", id, "vm="+strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "archived"})
 }
 
@@ -329,6 +332,7 @@ func (a *crudAPI) deleteCheck(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "deleteCheck", err)
 		return
 	}
+	a.auditConfig("check_delete", 0, "check_id="+strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -356,6 +360,7 @@ func (a *crudAPI) createDomain(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "createDomain", err)
 		return
 	}
+	a.auditConfig("domain_create", 0, "domain_id="+strconv.FormatInt(id, 10)+" name="+d.Name)
 	_ = a.st.EnsureDomainChecks(r.Context(), id)
 	writeJSON(w, http.StatusCreated, map[string]int64{"id": id})
 }
@@ -399,5 +404,6 @@ func (a *crudAPI) deleteDomain(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "deleteDomain", err)
 		return
 	}
+	a.auditConfig("domain_delete", 0, "domain_id="+strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

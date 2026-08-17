@@ -14,15 +14,22 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/skibine/vm-pulse/internal/ai"
 	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vm-pulse/internal/store"
 )
 
 // region FUNC_aiChat [DOMAIN(8): AI; CONCEPT(7): Handler; TECH(7): net/http]
-// @purpose Handle one copilot turn.
+// @purpose Handle one copilot turn. History is SERVER-side (shared with the Telegram bridge):
+//
+//	the client-sent history field is ignored for context purposes (kept in the request shape for
+//	compatibility) — the last 50 stored messages are loaded, the new turn appended after the
+//	answer. This makes web and Telegram one continuous conversation.
+//
 // @complexity 4
 // endregion FUNC_aiChat
 func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +40,7 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Message string       `json:"message"`
-		History []ai.Message `json:"history"`
+		History []ai.Message `json:"history"` // deprecated: server-side history is authoritative
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -42,7 +49,8 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message required"})
 		return
 	}
-	reply, err := s.agent.Ask(r.Context(), body.Message, body.History)
+	history := s.chatHistory(r.Context())
+	reply, err := s.agent.Ask(r.Context(), body.Message, history)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
 			logging.LDD(s.logger, 7, "aiChat", "DISABLED", "ai not configured")
@@ -53,5 +61,47 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "ai: " + err.Error()})
 		return
 	}
+	// Persist the completed turn so the OTHER frontend (Telegram) sees it too.
+	_ = s.store.AppendChatTurn(r.Context(), body.Message, reply.Reply)
 	writeJSON(w, http.StatusOK, map[string]any{"reply": reply.Reply, "trace": reply.Trace})
+}
+
+// chatHistory loads the shared conversation as agent history (nil-safe on store errors).
+func (s *Server) chatHistory(ctx context.Context) []ai.Message {
+	msgs, err := s.store.ListChatMessages(ctx, 50)
+	if err != nil {
+		logging.LDD(s.logger, 8, "aiChat", "HISTORY_FAIL", err.Error())
+		return nil
+	}
+	out := make([]ai.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == "user" || m.Role == "assistant" {
+			out = append(out, ai.Message{Role: m.Role, Content: m.Content})
+		}
+	}
+	return out
+}
+
+// aiHistory returns the shared conversation for UI rendering (newest 100, oldest first).
+func (s *Server) aiHistory(w http.ResponseWriter, r *http.Request) {
+	msgs, err := s.store.ListChatMessages(r.Context(), 100)
+	if err != nil {
+		logging.LDD(s.logger, 10, "aiHistory", "FAIL", err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if msgs == nil {
+		msgs = []store.ChatMessage{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+// aiHistoryClear empties the shared conversation (web "clear" button; Telegram starts fresh too).
+func (s *Server) aiHistoryClear(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.ClearChatMessages(r.Context()); err != nil {
+		logging.LDD(s.logger, 10, "aiHistoryClear", "FAIL", err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }

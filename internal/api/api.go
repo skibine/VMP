@@ -34,6 +34,10 @@ import (
 // shutdownTimeout bounds graceful shutdown.
 const shutdownTimeout = 5 * time.Second
 
+// Version is the build version stamp. Default "dev"; the release Makefile injects the real value
+// via -ldflags "-X 'main.Version=...'" (which main copies into this package var before New()).
+var Version = "dev"
+
 // region STRUCT_Server [DOMAIN(7): API; CONCEPT(7): Server; TECH(8): net/http]
 // @purpose Bind an *http.Server to the store and expose its mux for testing (httptest).
 // endregion STRUCT_Server
@@ -45,6 +49,7 @@ type Server struct {
 	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
 	crud       *crudAPI           // owns the domain-health cache + warmer loop
+	Version    string             // build version stamp (injected via -ldflags main.Version), "dev" if unset
 }
 
 // WithAgent attaches an AI agent (enables POST /api/ai/chat).
@@ -67,8 +72,11 @@ func (s *Server) Use(mw func(http.Handler) http.Handler) {
 // endregion FUNC_New
 func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
-	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA()}
+	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA(), Version: Version}
 	mux.HandleFunc("/healthz", srv.healthHandler)
+	// Public build-version endpoint (no auth) so the login page + header can show the version stamp
+	// for build-mismatch debugging (sandbox vs operator PC).
+	mux.HandleFunc("/api/version", srv.versionHandler)
 	mux.HandleFunc("POST /api/auth/login", srv.login)
 	mux.HandleFunc("POST /api/auth/login/2fa", srv.loginTwoFA)
 	mux.HandleFunc("POST /api/auth/logout", srv.logout)
@@ -79,6 +87,8 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/auth/2fa/disable", srv.twoFADisable)
 	mux.HandleFunc("PUT /api/auth/password", srv.changePassword)
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
+	mux.HandleFunc("GET /api/ai/history", srv.aiHistory)
+	mux.HandleFunc("DELETE /api/ai/history", srv.aiHistoryClear)
 	srv.crud = RegisterCRUD(mux, s, logger)          // TODO(auth): wrap CRUD routes with Plane B session middleware
 	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset
 	registerMetrics(mux, s, logger)                 // Plane A: metrics series + pull-poller toggle
@@ -115,6 +125,13 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if !dbOK {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
+}
+
+// versionHandler returns the build version stamp. Public (no auth) so the SPA/login page can show it
+// for build-mismatch debugging between environments.
+func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"version": s.Version})
 }
 
 // region FUNC_Serve [DOMAIN(7): API; CONCEPT(8): Lifecycle; TECH(8): net/http]

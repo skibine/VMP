@@ -35,22 +35,19 @@
     forceScroll = false
   })
 
-  // Persist chat to localStorage so it survives reloads (history is in-memory on the server side too).
-  const STORE_KEY = 'vmp_chat'
-  function persist() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(messages.slice(-100))) } catch (_) {}
-  }
-  function restore() {
+  // Server-side SHARED history (migration 0027): the same conversation the Telegram bridge uses,
+  // so a thread started here continues in Telegram and vice versa. The old localStorage cache is
+  // dead — on mount the transcript is loaded from /api/ai/history.
+  async function loadHistory() {
     try {
-      const raw = localStorage.getItem(STORE_KEY)
-      if (raw) messages = JSON.parse(raw)
-    } catch (_) {}
+      const res = await api.aiHistory()
+      messages = (res.messages || []).map((m) => ({ role: m.role, text: m.content }))
+    } catch (_) { /* keep whatever is on screen */ }
   }
-  restore()
 
   function clearChat() {
     messages = []
-    persist()
+    api.clearAIHistory().catch(() => {})
   }
 
   // Pending AI actions (Plane B approval). Polled so an out-of-band proposal surfaces here.
@@ -59,6 +56,7 @@
   let pollTimer = null
 
   onMount(() => {
+    loadHistory()
     refreshPending()
     pollTimer = setInterval(refreshPending, 2000)
   })
@@ -94,25 +92,18 @@
 
   // askAI sends one turn to the assistant. `userMsg` is pushed to the transcript first (the user's
   // text, or a synthetic system-injected note). Used by send() and by the post-approve continuation.
+  // History lives SERVER-side (shared with Telegram): the request carries no history.
   async function askAI(text, userMsg) {
     messages = [...messages, userMsg]
     forceScroll = true
-    persist()
     busy = true
     try {
-      // Only the last 8 user/assistant turns are sent as LLM context (provider window constraint).
-      const history = messages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .slice(-9, -1)
-        .map((m) => ({ role: m.role, content: m.text }))
-      const res = await api.aiChat(text, history)
+      const res = await api.aiChat(text, [])
       const parsed = parseReply(res.reply || '')
       messages = [...messages, { role: 'assistant', text: parsed.text, artifact: parsed.artifact, trace: res.trace || [] }]
       forceScroll = true
-      persist()
     } catch (e) {
       messages = [...messages, { role: 'assistant', text: '⚠ ' + e.message, artifact: null, trace: [] }]
-      persist()
     } finally {
       busy = false
     }

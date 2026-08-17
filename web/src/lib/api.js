@@ -64,7 +64,9 @@ export const api = {
   allDomainHealth: () => req('/api/domains/health'),
   domainIPInfo: (id) => req('/api/domains/' + id + '/ipinfo'),
   domainPortScan: (id) => req('/api/domains/' + id + '/portscan'),
+  domainIntel: (id) => req('/api/domains/' + id + '/intel'),
   resolveTelegramChatId: (token) => req('/api/channels/telegram/resolve', { method: 'POST', body: { bot_token: token } }),
+  version: () => req('/api/version'),
   listVms: () => req('/api/vms'),
   getVm: (id) => req('/api/vms/' + id),
   createVm: (vm) => req('/api/vms', { method: 'POST', body: vm }),
@@ -104,6 +106,19 @@ export const api = {
   vmHealth: (id) => req('/api/vms/' + id + '/health'),
   vmResults: (id) => req('/api/vms/' + id + '/results'),
   aiChat: (message, history) => req('/api/ai/chat', { method: 'POST', body: { message, history } }),
+  aiHistory: () => req('/api/ai/history'),
+  clearAIHistory: () => req('/api/ai/history', { method: 'DELETE' }),
+  auditEvents: (params) => {
+    const q = Object.entries(params || {}).filter(([, v]) => v !== '' && v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&')
+    return req('/api/audit' + (q ? '?' + q : ''))
+  },
+  clearAudit: (before) => req('/api/audit' + (before ? '?before=' + encodeURIComponent(before) : ''), { method: 'DELETE' }),
+  notificationsAll: (params) => {
+    const q = Object.entries(params || {}).filter(([, v]) => v !== '' && v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&')
+    return req('/api/notifications/all' + (q ? '?' + q : ''))
+  },
+  clearNotifications: (scope) => req('/api/notifications?scope=' + encodeURIComponent(scope || 'read'), { method: 'DELETE' }),
+
 
   // Settings
   getAISettings: () => req('/api/settings/ai'),

@@ -66,6 +66,7 @@ type WhoisInfo struct {
 	DaysRemaining int   `json:"days_remaining"` // -1 when expiry unparseable
 	Status       string `json:"status"` // ok | error
 	Error        string `json:"error,omitempty"`
+	Note         string `json:"note,omitempty"` // e.g. "parent zone: example.top" for 3LD lookups
 }
 
 // expiryDateLayouts are the common registrar date formats (tried in order). Whois responses vary
@@ -217,23 +218,48 @@ func certInfo(ctx context.Context, domain string) (CertInfo, error) {
 // @purpose reported as DaysRemaining=-1 (unknown), never as 0.
 // @complexity 7
 // endregion FUNC_whoisLookup
+// region FUNC_whoisLookup [DOMAIN(8): Observability; CONCEPT(7): Registration; TECH(7): net+rdap]
+// RESTORED-ORIGINAL: the battle-tested 2-hop lookup (IANA referral -> authoritative registry,
+// RDAP fallback when classic whois yields no expiry). The resilience layers added on 2026-08-17
+// (static referral table, negative IANA cache, rdap.org redirector, per-leg 25s budget) made the
+// chain SLOWER and flakier on some networks (a single slow official RDAP hop could eat the whole
+// budget) and were rolled back wholesale at the operator's request. Only two safe bits kept:
+// the RDAP-rescue status clear (data present => not an error) and the inert WhoisInfo.Note.
+// ianaAddr is the IANA referral endpoint (var so tests inject a fake).
+var ianaAddr = "whois.iana.org:43"
+
+// whoisBudget caps the ENTIRE whois chain regardless of the caller's context. Background callers
+// (engine whois checks, domain warmer) pass contexts without deadlines; without this cap one
+// stalled chain could outlive everything (see rdapClient comment). A var so tests can shrink it.
+var whoisBudget = 20 * time.Second
+
 func whoisLookup(ctx context.Context, domain string) (WhoisInfo, error) {
-	ref, err := whoisQuery(ctx, domain, "whois.iana.org:43")
+	ctx, cancel := context.WithTimeout(ctx, whoisBudget)
+	defer cancel()
+	ref, err := whoisQuery(ctx, domain, ianaAddr)
 	if err != nil {
 		return WhoisInfo{Status: "error", Error: err.Error()}, nil
 	}
+	// BUG_FIX_CONTEXT (home-IP case, 2026-08-17): some registries (verified: whois.nic.top)
+	// ACCEPT the TCP connection and immediately RST it for blocked IP ranges — in Go that reads
+	// as an EMPTY response with nil error. Feeding the IANA referral body instead leaked TLD-level
+	// data as domain data; feeding "" yields the honest "no parseable fields" that then triggers
+	// the RDAP rescue below. Only a non-empty registry answer is trusted.
 	server := parseRefer(ref)
-	body := ref
+	body := ""
 	if server != "" {
-		if b, err := whoisQuery(ctx, domain, server+":43"); err == nil {
+		if b, qerr := whoisQuery(ctx, domain, server+":43"); qerr == nil && strings.TrimSpace(b) != "" {
 			body = b
 		}
 	}
 	wi := parseWhoisFields(body)
-	// Classic whois gave no expiry (RDAP-only zone, empty referral, etc.): try RDAP to get the real
-	// registration expiry instead of treating the domain as already expired.
+	// Classic whois gave no expiry (RDAP-only zone, registry blocked the IP, empty referral,
+	// etc.): try RDAP to get the real registration expiry. The official bootstrap base may be
+	// dead (verified: .top announces rdap.nic.top which does not resolve) — the universal
+	// HTTPS redirector (rdap.org) is the second, port-443-only attempt that survives registry
+	// port-43 IP blocks.
 	if wi.Expiry == "" {
-		if rw, rerr := rdapLookup(ctx, domain); rerr == nil && rw.Expiry != "" {
+		if rw, rerr := rdapLookupAny(ctx, domain); rerr == nil && rw.Expiry != "" {
 			if wi.Registrar == "" {
 				wi.Registrar = rw.Registrar
 			}
@@ -242,12 +268,17 @@ func whoisLookup(ctx context.Context, domain string) (WhoisInfo, error) {
 			}
 			wi.Expiry = rw.Expiry
 			wi.DaysRemaining = rw.DaysRemaining
+			// RDAP rescued the lookup: the record IS complete — do not show an error next to data.
+			wi.Status = "ok"
+			wi.Error = ""
 		}
 	}
 	return wi, nil
 }
 
 // whoisQuery opens a TCP whois connection, sends the query, returns the raw text (bounded).
+// The connection deadline is min(8s, ctx deadline): a stalling server must never outlive the
+// caller's budget (whoisLookup caps the whole chain).
 func whoisQuery(ctx context.Context, query, addr string) (string, error) {
 	d := net.Dialer{}
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -255,7 +286,11 @@ func whoisQuery(ctx context.Context, query, addr string) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+	dl := time.Now().Add(8 * time.Second)
+	if cd, ok := ctx.Deadline(); ok && cd.Before(dl) {
+		dl = cd
+	}
+	_ = conn.SetDeadline(dl)
 	if _, err := conn.Write([]byte(query + "\r\n")); err != nil {
 		return "", err
 	}

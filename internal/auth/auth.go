@@ -163,11 +163,15 @@ func WithUser(ctx context.Context, uid int64) context.Context {
 	return context.WithValue(ctx, ctxKey{}, uid)
 }
 
-// isPublic: anything outside /api/ (frontend assets, /healthz) is public; only the login endpoints
-// under /api/ are public (POST /api/auth/login and the 2FA-completion POST /api/auth/login/2fa).
-// All other /api/* routes require a valid session.
+// isPublic: anything outside /api/ (frontend assets, /healthz) is public; the login endpoints
+// under /api/ are public (POST /api/auth/login and the 2FA-completion POST /api/auth/login/2fa), and
+// GET /api/version is public (build stamp, shown pre-login for build-mismatch debugging). All other
+// /api/* routes require a valid session.
 func isPublic(r *http.Request) bool {
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		return true
+	}
+	if r.URL.Path == "/api/version" && r.Method == http.MethodGet {
 		return true
 	}
 	if r.Method != http.MethodPost {

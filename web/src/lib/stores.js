@@ -61,3 +61,7 @@ export const credRevision = writable(0)
 export function bumpCreds() {
   credRevision.update((n) => n + 1)
 }
+
+// Build version stamp (fetched from /api/version on load). Shown in the header so the operator can
+// compare their build against a reference (sandbox vs PC) — catches stale/cached bundles.
+export const appVersion = writable('')

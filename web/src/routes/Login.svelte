@@ -1,6 +1,9 @@
 <script>
   import { api } from '../lib/api.js'
-  import { token, user } from '../lib/stores.js'
+  import { token, user, appVersion } from '../lib/stores.js'
+  import { onMount } from 'svelte'
+  import { tick } from 'svelte'
+  onMount(() => { api.version().then((v) => { if (v && v.version) appVersion.set(v.version) }).catch(() => {}) })
   import { t } from '../lib/i18n.js'
 
   let username = ''
@@ -9,6 +12,11 @@
   let busy = false
   let twoFA = null // {pending_token} when step 2 is required
   let code = ''
+  let codeInput = null
+
+  // Autofocus the 2FA field the moment it appears: the operator reads the code off their phone
+  // and types without looking back at the screen — the cursor must already be in the field.
+  $: if (twoFA && codeInput) tick().then(() => codeInput.focus())
 
   function finish(res) {
     token.set(res.token)
@@ -59,7 +67,7 @@
     class="hud-panel scan w-full max-w-sm p-8 space-y-5"
   >
     <div class="space-y-1">
-      <div class="hud-label">// VM PULSE</div>
+      <div class="hud-label">// VM PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
       <h1 class="text-2xl font-mono text-neon-green tracking-wide">{$t('login.title')}</h1>
       <p class="text-xs text-hud-dim">{twoFA ? $t('login.codePrompt') : $t('login.passPrompt')}</p>
     </div>
@@ -67,7 +75,7 @@
     {#if twoFA}
       <label class="block space-y-1">
         <span class="hud-label">{$t('login.codeLabel')}</span>
-        <input class="hud-input" bind:value={code} autocomplete="one-time-code" placeholder="123456" />
+        <input class="hud-input" bind:value={code} bind:this={codeInput} autocomplete="one-time-code" placeholder="123456" inputmode="numeric" />
       </label>
     {:else}
       <label class="block space-y-1">
