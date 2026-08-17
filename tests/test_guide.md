@@ -1,7 +1,7 @@
 # Test Guide — Phase 0 Bootstrap Scaffold
 
 Bridges the Coder output to an independent QA tester. Read alongside
-`.kilo/plans/devplan-00-bootstrap-scaffold.md`.
+`the bootstrap development plan (see the project history)`.
 
 ## Scope under test
 

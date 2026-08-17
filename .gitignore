@@ -39,6 +39,10 @@ coverage.out
 .vscode/
 .DS_Store
 
+# Agent framework workspaces (local tooling only, never committed)
+/.kilo/
+/.kilocode/
+
 # Playwright MCP session artifacts (transient screenshots/snapshots)
 /.playwright-mcp/
 debug-*.png

@@ -1,9 +1,7 @@
 # AGENTS.md — VM Pulse (Go adaptation of the semantic protocol)
 
-This project follows the KiloCode semantic protocol (see `.kilocode/rules/rules.md`),
-**adapted for Go + Svelte + SQLite** (not Python). Any agent working in this repo MUST
-respect the adaptations below. When the Python-oriented rules in `.kilocode/skill/*` conflict
-with this file, **this file wins for Go code**.
+This project uses a structured agent workflow **adapted for Go + Svelte + SQLite**.
+Any agent working in this repo MUST respect the conventions below.
 
 ## Project facts
 
@@ -13,8 +11,7 @@ with this file, **this file wins for Go code**.
   cross-compiles cleanly (Win/Linux/macOS × x64/arm64). Do NOT switch to CGO drivers
   without revisiting the cross-compile pipeline.
 - **Build/test entry:** `go build ./...`, `go test ./...`, `go vet ./...`.
-- **Design docs:** `.kilocode/2026-06-16-vmpulse-design.md` (v1) and
-  `.kilo/plans/1781676816769-vmpulse-foundation-v2.md` (v2 — authoritative on conflict).
+- Design docs live in the private development archive (not part of the public repo).
 
 ## Lint / typecheck / test commands
 

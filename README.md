@@ -90,9 +90,7 @@ Database migrations apply automatically on start; a `.bak` snapshot is taken bef
 
 ## Documentation for agents
 
-- `AGENTS.md` — Go adaptation of the semantic protocol (regions, LDD, testing).
-- `.kilo/plans/1781676816769-vmpulse-foundation-v2.md` — authoritative design (v2).
-- `.kilo/plans/*.md` — per-slice development plans (telegram bridge, ux batches, …).
+- `AGENTS.md` — repo conventions for AI coding agents (semantic markup, LDD logging, testing).
 
 ## License
 
