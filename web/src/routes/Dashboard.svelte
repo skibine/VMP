@@ -12,7 +12,14 @@
   import Settings from './Settings.svelte'
   import Events from './Events.svelte'
 
-  let view = 'fleet' // 'fleet' | 'alerts' | 'settings'  (domains merged into the fleet)
+  // View survives a refresh: restore from localStorage, validated against the allowed set
+  // (a stale/garbage value collapses to fleet, never to a broken view).
+  const VIEWS = ['fleet', 'events', 'settings']
+  let view = localStorage.getItem('vmp.view')
+  if (!VIEWS.includes(view)) view = 'fleet' // 'fleet' | 'events' | 'settings'
+  // BUG_FIX_CONTEXT: this reactive write MUST stay at the component top level - inside a
+  // callback (onMount) `$:` degrades to a plain JS label and runs once, never persisting.
+  $: if (VIEWS.includes(view)) localStorage.setItem('vmp.view', view)
   // Unified selection: null = fleet overview; 'vm' = a VM; 'domain' = a domain.
   let selKind = null
   let selId = null

@@ -251,7 +251,11 @@
       stopMsg = $t('set.stopFail')
       return
     }
-    setTimeout(() => { $appVersion; location.reload() }, 4000)
+    // BUG_FIX_CONTEXT: this callback previously read $appVersion, which Settings.svelte does
+    // NOT import - Svelte hoisted it into the component's store subscriptions, so the whole
+    // Settings component crashed with ReferenceError at mount ("settings page freezes").
+    // Vite does not catch this (runtime error, not compile). reload() needs no store.
+    setTimeout(() => location.reload(), 4000)
   }
 
   onMount(loadAI)
