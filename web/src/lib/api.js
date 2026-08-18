@@ -108,6 +108,7 @@ export const api = {
   aiChat: (message, history) => req('/api/ai/chat', { method: 'POST', body: { message, history } }),
   aiHistory: () => req('/api/ai/history'),
   clearAIHistory: () => req('/api/ai/history', { method: 'DELETE' }),
+  shutdownServer: () => req('/api/server/shutdown', { method: 'POST' }),
   auditEvents: (params) => {
     const q = Object.entries(params || {}).filter(([, v]) => v !== '' && v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&')
     return req('/api/audit' + (q ? '?' + q : ''))

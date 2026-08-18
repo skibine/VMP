@@ -258,6 +258,12 @@ const en = {
   'set.confirmEnable': 'confirm & enable',
   'set.backupCodes': 'backup codes — store these safely (shown once)',
   'set.backupHint': 'each works as a one-time 2FA code if you lose your device. lose these too → operator reset on the box (`vmpulse -reset-2fa`).',
+  'set.stopTitle': 'server control',
+  'set.stopBtn': 'stop server',
+  'set.stopHint': 'graceful stop (same as Ctrl+C): drains HTTP, closes the DB. the page will try to reconnect.',
+  'set.stopConfirm': 'stop the vmpulse server? monitoring/alerts go down until it is started again.',
+  'set.stopSent': 'stopping… waiting for the server to go away',
+  'set.stopFail': 'stop request failed (server already down?)',
 
   // alerts
   'al.channels': 'channels // {n}',
@@ -681,6 +687,12 @@ const ru = {
   'set.confirmEnable': 'подтвердить и включить',
   'set.backupCodes': 'резервные коды — храните надёжно (показаны один раз)',
   'set.backupHint': 'каждый работает как одноразовый код 2FA при потере устройства. потеря и этих = сброс оператором на сервере (`vmpulse -reset-2fa`).',
+  'set.stopTitle': 'управление сервером',
+  'set.stopBtn': 'остановить сервер',
+  'set.stopHint': 'корректная остановка (как Ctrl+C): дрен HTTP, закрытие БД. страница попробует переподключиться.',
+  'set.stopConfirm': 'остановить сервер vmpulse? мониторинг и оповещения лягут, пока его не запустят снова.',
+  'set.stopSent': 'останавливаю… ждём, пока сервер потухнет',
+  'set.stopFail': 'запрос остановки не прошёл (сервер уже выключен?)',
 
   // alerts
   'al.channels': 'каналы // {n}',

@@ -49,6 +49,7 @@ type Server struct {
 	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
 	chatMirror ChatMirror         // optional web->telegram chat relay
+	shutdownFn func()             // graceful-stop trigger (main wires it to the signal ctx cancel)
 	crud       *crudAPI           // owns the domain-health cache + warmer loop
 	Version    string             // build version stamp (injected via -ldflags main.Version), "dev" if unset
 }
@@ -98,7 +99,8 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/auth/2fa/enable", srv.twoFAEnable)
 	mux.HandleFunc("POST /api/auth/2fa/disable", srv.twoFADisable)
 	mux.HandleFunc("PUT /api/auth/password", srv.changePassword)
-	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
+	mux.HandleFunc("POST /api/server/shutdown", srv.handleShutdown) // Plane B: graceful stop from the UI
+	mux.HandleFunc("POST /api/ai/chat", srv.aiChat)                 // TODO(auth): gate in Plane B session middleware
 	mux.HandleFunc("GET /api/ai/history", srv.aiHistory)
 	mux.HandleFunc("DELETE /api/ai/history", srv.aiHistoryClear)
 	srv.crud = RegisterCRUD(mux, s, logger) // TODO(auth): wrap CRUD routes with Plane B session middleware
