@@ -91,7 +91,12 @@ FROM check_results WHERE check_id=? ORDER BY ts DESC, id DESC LIMIT ?`, checkID,
 // @complexity 3
 // endregion FUNC_RetentionDeleteResults
 func (s *Store) RetentionDeleteResults(ctx context.Context, beforeDays int) (int64, error) {
-	cutoff := time.Now().UTC().AddDate(0, 0, -beforeDays).Format(time.RFC3339Nano)
+	// BUG_FIX_CONTEXT: check_results.ts has millisecond precision (literal 'Z' suffix); an
+	// RFC3339Nano cutoff compares GREATER-then-equal to same-ms rows in TEXT order ('Z' > digit),
+	// so bursts inserted in the cutoff's own millisecond survived a beforeDays=0 purge on fast
+	// machines. Ceiling the cutoff to the NEXT millisecond in the column's exact format.
+	cutoff := time.Now().UTC().AddDate(0, 0, -beforeDays).Add(time.Millisecond).
+		Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 	res, err := s.DB.ExecContext(ctx, `DELETE FROM check_results WHERE ts < ?`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("RetentionDeleteResults: %w", err)
