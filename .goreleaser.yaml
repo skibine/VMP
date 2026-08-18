@@ -1,0 +1,64 @@
+# region GORELEASER [DOMAIN(8): Release; CONCEPT(8): Packaging; TECH(9): GoReleaser]
+# @purpose Tag-driven release: 6 hardened artifacts (linux/windows/darwin x amd64/arm64),
+#   pure-Go build (CGO off) so cross-compile stays clean for modernc.org/sqlite.
+# NOTE: the SPA (internal/web/dist) MUST be built BEFORE goreleaser runs
+#   (see .github/workflows/release.yml) - go:embed bakes it in at compile time.
+# GREP_SUMMARY: goreleaser, release, artifacts, tar.gz, zip, checksums, changelog, cross-compile
+# STRUCTURE: ▶ tag v* → ┌SPA(dist)┐ → ○ build 6x (CGO=0, -s -w) → ⊕ archives → ∑ checksums → ⦲ GitHub Release
+version: 2
+
+project_name: vmpulse
+
+builds:
+  - id: vmpulse
+    main: ./cmd/vmpulse
+    binary: vmpulse
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      # Hardening flags mirror the Makefile: strip symbols/debug, drop buildid,
+      # trim paths (reduces AV false positives on unsigned Go binaries).
+      - -s -w -buildid=
+      - -X main.Version={{ .Version }}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: default
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - config.yaml.example
+      - LICENSE*
+    wrap_in_directory: true
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - '^style:'
+
+release:
+  prerelease: auto
+  header: |
+    ## VM Pulse {{ .Tag }}
+
+    Single binary: Go + embedded Svelte SPA + pure-Go SQLite (no CGO).
+
+    Quick start: run the binary, open the printed address, and follow the
+    first-start install wizard. See README.md for details.
