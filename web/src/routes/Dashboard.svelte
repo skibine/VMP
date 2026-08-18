@@ -60,7 +60,10 @@
 
 <div class="h-full flex flex-col overflow-hidden">
   <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0 relative z-10">
-    <div class="hud-label">// VM&nbsp;PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
+    <div class="flex items-center gap-2 shrink-0">
+      <img src="/logo.png" alt="VM Pulse" class="h-6 w-6" />
+      <div class="hud-label">// VM&nbsp;PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
+    </div>
     <div class="flex items-center gap-1">
       <button class="hud-btn {view === 'fleet' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'fleet')}>{$t('nav.fleet')}</button>
       <button class="hud-btn {view === 'events' ? 'hud-btn-primary' : ''}" on:click={() => (view = 'events')}>{$t('nav.events')}</button>
