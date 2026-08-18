@@ -24,6 +24,16 @@ import (
 	"github.com/skibine/vm-pulse/internal/logging"
 )
 
+// metricTS formats a time exactly like the metric_samples.ts column DEFAULT
+// (strftime('%Y-%m-%dT%H:%M:%fZ','now') -> millisecond precision, literal 'Z'), so range
+// bounds compare byte-for-byte against stored rows.
+// BUG_FIX_CONTEXT: RFC3339Nano bounds ended with sub-ms digits, and 'Z' > any digit, so a
+// sample stored in the same millisecond as the query bound was string-compared as GREATER
+// than the bound and silently excluded from series (broke fast machines / CI).
+func metricTS(t time.Time) string {
+	return t.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+}
+
 // MetricSample is one EAV row.
 type MetricSample struct {
 	TS         time.Time
@@ -91,7 +101,7 @@ func (s *Store) ListMetricsEnabledVMs(ctx context.Context) ([]VM, error) {
 func (s *Store) LatestMetricValue(ctx context.Context, vmID int64, name string) (float64, bool, error) {
 	var v float64
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT value FROM metric_samples WHERE vm_id=? AND metric_name=? ORDER BY ts DESC LIMIT 1`,
+		`SELECT value FROM metric_samples WHERE vm_id=? AND metric_name=? ORDER BY ts DESC, id DESC LIMIT 1`,
 		vmID, name).Scan(&v)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
@@ -109,10 +119,12 @@ func (s *Store) MetricSeries(ctx context.Context, vmID int64, name string, from,
 	if to.Sub(from) > 7*24*time.Hour {
 		res = "1h"
 	}
+	// BUG_FIX_CONTEXT: bounds use metricTS (ms precision, same as the column DEFAULT) so that
+	// same-millisecond rows are included by the TEXT comparison (see metricTS).
 	q := `SELECT ts, value FROM metric_samples
  WHERE vm_id=? AND metric_name=? AND resolution=? AND ts>=? AND ts<=?
- ORDER BY ts ASC`
-	rows, err := s.DB.QueryContext(ctx, q, vmID, name, res, from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano))
+ ORDER BY ts ASC, id ASC`
+	rows, err := s.DB.QueryContext(ctx, q, vmID, name, res, metricTS(from), metricTS(to))
 	if err != nil {
 		return nil, fmt.Errorf("MetricSeries: %w", err)
 	}
@@ -145,7 +157,8 @@ func (s *Store) MetricSeries(ctx context.Context, vmID int64, name string, from,
 // endregion FUNC_Store_Downsample
 // STRUCTURE: ▶ ┌cutoff┐ → ◇ raw>7d → ⚡ INSERT 1h=AVG(GROUP BY hour) → ⊖ DELETE raw → ⎷ count
 func (s *Store) Downsample(ctx context.Context, keep time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-keep).Format(time.RFC3339Nano)
+	// metricTS keeps the cutoff byte-comparable with both ms-default rows and Nano-seeded rows.
+	cutoff := metricTS(time.Now().UTC().Add(-keep))
 
 	// Aggregate raw rows older than cutoff into hourly buckets (per vm+metric+hour).
 	ins, err := s.DB.ExecContext(ctx, `

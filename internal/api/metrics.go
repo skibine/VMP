@@ -104,7 +104,7 @@ func (a *metricsAPI) latestSample(ctx context.Context, vmID int64) (map[string]a
 		var v float64
 		var t string
 		err := a.st.DB.QueryRowContext(ctx,
-			`SELECT value, ts FROM metric_samples WHERE vm_id=? AND metric_name=? ORDER BY ts DESC LIMIT 1`,
+			`SELECT value, ts FROM metric_samples WHERE vm_id=? AND metric_name=? ORDER BY ts DESC, id DESC LIMIT 1`,
 			vmID, name).Scan(&v, &t)
 		if err == nil {
 			out[name] = v
