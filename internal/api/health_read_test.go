@@ -1,8 +1,12 @@
 // region MODULE_CONTRACT_test [DOMAIN(7): Testing; CONCEPT(7): HealthAPI; TECH(8): go test,httptest]
 // @purpose Verify GET /api/vms/{id}/results and /api/vms/{id}/health, incl. 404 + empty arrays.
+//
+//	Covers the auto-provisioned system checks coexisting with manual ones: results list every
+//	check (our row found by check_id), health skips disabled system checks.
+//
 // endregion MODULE_CONTRACT_test
-// GREP_SUMMARY: test, results, health, endpoint, httptest, score, 404
-// STRUCTURE: ▶ ┌server┐ → POST vm+check → ⊕ insert result → ○ GET results/health → 〈assert〉
+// GREP_SUMMARY: test, results, health, endpoint, httptest, score, 404, system checks
+// STRUCTURE: ▶ ┌server┐ → POST vm → ⚡ disable system checks → POST tcp check → ⊕ insert result → ○ GET results/health → 〈assert〉
 package api
 
 import (
@@ -13,15 +17,31 @@ import (
 	"testing"
 )
 
+// region FUNC_test_VMResultsAndHealth [DOMAIN(7): Testing; CONCEPT(7): HealthAPI; TECH(6): httptest]
+// @purpose Verify the read endpoints reflect exactly the manual check's stored result when the
+//
+//	auto-provisioned system checks are disabled (deterministic health score of 100).
+//
+// @complexity 5
+// endregion FUNC_test_VMResultsAndHealth
 func TestHTTP_VMResultsAndHealth(t *testing.T) {
 	srv, buf := newServer(t)
 
-	// Create VM.
+	// Create VM (createVM auto-provisions system liveness+exposures checks).
 	rec := do(srv, http.MethodPost, "/api/vms", `{"name":"web1","hostname":"10.0.0.1","port_ssh":22}`)
 	var vm struct {
 		ID int64 `json:"id"`
 	}
 	decode(t, rec, &vm)
+
+	// BUG_FIX_CONTEXT: since auto-provisioning landed, a fresh VM carries 2 system checks
+	// (liveness + exposures) that never ran; they drag the health score below 100 and broke
+	// the old 1-row expectation (the historical "flake"). Disable them via the store so the
+	// assertions below exercise exactly the manual tcp check.
+	if _, err := srv.store.DB.ExecContext(context.Background(),
+		`UPDATE checks SET enabled=0 WHERE vm_id=? AND system=1`, vm.ID); err != nil {
+		t.Fatalf("disable system checks: %v", err)
+	}
 
 	// Create a check.
 	rec = do(srv, http.MethodPost, "/api/checks",
@@ -36,7 +56,8 @@ func TestHTTP_VMResultsAndHealth(t *testing.T) {
 		t.Fatalf("InsertCheckResult: %v", err)
 	}
 
-	// GET /api/vms/{id}/results -> array (not null).
+	// GET /api/vms/{id}/results -> array (not null); our tcp row is found by check_id
+	// (disabled system checks are still listed by the read model).
 	rec = do(srv, http.MethodGet, "/api/vms/"+strconv.FormatInt(vm.ID, 10)+"/results", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("results want 200, got %d", rec.Code)
@@ -46,14 +67,23 @@ func TestHTTP_VMResultsAndHealth(t *testing.T) {
 	}
 	var rows []map[string]any
 	decode(t, rec, &rows)
-	if len(rows) != 1 {
-		t.Fatalf("results want 1 row, got %d", len(rows))
+	if len(rows) < 1 {
+		t.Fatalf("results want >=1 row, got %d", len(rows))
 	}
-	if rows[0]["latest_status"] != "ok" {
-		t.Fatalf("latest_status want ok, got %v", rows[0]["latest_status"])
+	var ours map[string]any
+	for _, r := range rows {
+		if v, ok := r["check_id"].(float64); ok && int64(v) == chk.ID {
+			ours = r
+		}
+	}
+	if ours == nil {
+		t.Fatalf("results must contain the tcp check %d, got %s", chk.ID, rec.Body.String())
+	}
+	if ours["latest_status"] != "ok" {
+		t.Fatalf("tcp check latest_status want ok, got %v", ours["latest_status"])
 	}
 
-	// GET /api/vms/{id}/health -> score 100, status ok.
+	// GET /api/vms/{id}/health -> score 100, status ok (disabled system checks are skipped).
 	rec = do(srv, http.MethodGet, "/api/vms/"+strconv.FormatInt(vm.ID, 10)+"/health", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("health want 200, got %d", rec.Code)
@@ -76,3 +106,5 @@ func TestHTTP_VMResultsAndHealth(t *testing.T) {
 	printIMPFromBuf(t, buf)
 	assertContains(t, buf, "[IMP:7][vmHealth][PROBE]")
 }
+
+// endregion FUNC_test_VMResultsAndHealth
