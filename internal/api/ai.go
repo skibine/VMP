@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/skibine/vm-pulse/internal/ai"
 	"github.com/skibine/vm-pulse/internal/logging"
@@ -50,6 +51,7 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	history := s.chatHistory(r.Context())
+	watermark := s.maxPendingActionID(r.Context()) // pre-turn: pending actions created BY this turn get mirrored
 	reply, err := s.agent.Ask(r.Context(), body.Message, history)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
@@ -63,7 +65,27 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 	}
 	// Persist the completed turn so the OTHER frontend (Telegram) sees it too.
 	_ = s.store.AppendChatTurn(r.Context(), body.Message, reply.Reply)
+	// Push the turn to the telegram bridge (web->telegram half of the shared conversation) so the
+	// operator reads the web chat in telegram without refreshing. Async + bounded: the HTTP
+	// response never waits on telegram, and no telegram config => chatMirror is nil => no-op.
+	if s.chatMirror != nil {
+		go func(user, assistant string, wm int64) {
+			mctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			s.chatMirror.MirrorWebTurn(mctx, user, assistant, wm)
+		}(body.Message, reply.Reply, watermark)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"reply": reply.Reply, "trace": reply.Trace})
+}
+
+// maxPendingActionID returns the highest ai_action id (0 on error/none) — the pre-turn watermark
+// the chat mirror uses to announce only actions proposed during the mirrored turn.
+func (s *Server) maxPendingActionID(ctx context.Context) int64 {
+	actions, err := s.store.ListAIActions(ctx, "")
+	if err != nil || len(actions) == 0 {
+		return 0
+	}
+	return actions[0].ID
 }
 
 // chatHistory loads the shared conversation as agent history (nil-safe on store errors).

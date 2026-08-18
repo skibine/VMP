@@ -48,12 +48,24 @@ type Server struct {
 	mux        *http.ServeMux
 	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
+	chatMirror ChatMirror         // optional web->telegram chat relay
 	crud       *crudAPI           // owns the domain-health cache + warmer loop
 	Version    string             // build version stamp (injected via -ldflags main.Version), "dev" if unset
 }
 
 // WithAgent attaches an AI agent (enables POST /api/ai/chat).
 func (s *Server) WithAgent(a *ai.Agent) *Server { s.agent = a; return s }
+
+// ChatMirror relays completed WEB chat turns to an external frontend (the Telegram bridge).
+// Optional: without one the web chat works exactly as before (setups without telegram).
+type ChatMirror interface {
+	// actionWatermark is the max ai_action id BEFORE the turn; the mirror uses it to surface
+	// only the pending actions this turn created (with approve buttons where supported).
+	MirrorWebTurn(ctx context.Context, user, assistant string, actionWatermark int64)
+}
+
+// WithChatMirror attaches the web->telegram relay (no-op when never called).
+func (s *Server) WithChatMirror(m ChatMirror) *Server { s.chatMirror = m; return s }
 
 // Use wraps the mux with middleware (e.g. auth). Called after New in production wiring.
 // Tests build the server without Use, so they exercise routes unauthenticated.

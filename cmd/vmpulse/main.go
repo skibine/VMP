@@ -202,7 +202,9 @@ func main() {
 	// the agent_chat_enabled config flag). Long-poll based — works behind NAT, no inbound ports;
 	// proposed commands surface back in the chat as ✅/❌ buttons resolved through the shared
 	// approve-path. Runs until ctx is cancelled.
-	go (&tgchat.Manager{Store: s, Agent: agent, Approver: server, Logger: logger}).Run(ctx)
+	tgMgr := &tgchat.Manager{Store: s, Agent: agent, Approver: server, Logger: logger}
+	server.WithChatMirror(tgMgr) // web chat turns relay to telegram (no-op w/o agent_chat_enabled)
+	go tgMgr.Run(ctx)
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
 	// records CPU/RAM/disk/load samples; hourly downsampling (§5.2). Runs until ctx is cancelled.

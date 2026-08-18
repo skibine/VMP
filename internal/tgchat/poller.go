@@ -189,6 +189,21 @@ func (p *poller) handleMessage(ctx context.Context, msg *tgMessage) {
 	p.announcePending(ctx, chatID, watermark)
 }
 
+// region FUNC_poller_mirrorTurn [DOMAIN(8): Integration; CONCEPT(7): WebMirror; TECH(6): sendMessage]
+// @purpose Relay a completed WEB chat turn into this bot's allowed chats (the web->telegram half
+//
+//	of the shared conversation; telegram->web already works via the shared history) and surface
+//	pending actions the web turn created, with the same approve buttons as native turns.
+//
+// @complexity 4
+// endregion FUNC_poller_mirrorTurn
+func (p *poller) mirrorTurn(ctx context.Context, chatID, user, assistant string, watermark int64) {
+	text := "🌐 " + truncate(user, 3500) + "\n\n" + assistant
+	p.reply(ctx, chatID, text)
+	p.announcePending(ctx, chatID, watermark)
+	logging.LDD(p.logger, 8, "tgchat", "MIRRORED", "chat="+chatID+" web turn relayed")
+}
+
 // handleAskError turns an agent failure into a short chat message (rate-limited for the
 // not-configured case so a curious chat doesn't spam itself every message).
 func (p *poller) handleAskError(ctx context.Context, chatID string, err error) {

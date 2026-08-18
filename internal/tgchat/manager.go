@@ -26,12 +26,21 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/skibine/vm-pulse/internal/audit"
 	"github.com/skibine/vm-pulse/internal/logging"
 	"github.com/skibine/vm-pulse/internal/store"
 )
+
+// loop is one running poller entry (kept in Manager.current while active).
+type loop struct {
+	cancel  context.CancelFunc
+	chatIDs map[string]bool
+	apiBase string
+	p       *poller
+}
 
 // Manager supervises the Telegram chat pollers.
 type Manager struct {
@@ -41,6 +50,9 @@ type Manager struct {
 	Logger   *slog.Logger
 
 	ResyncEvery time.Duration // test hook; default 30s
+
+	mu      sync.Mutex // guards current (Run's resync vs MirrorWebTurn callers)
+	current map[string]*loop
 }
 
 // region FUNC_Manager_Run [DOMAIN(8): Integration; CONCEPT(7): Supervise; TECH(7): goroutines]
@@ -48,13 +60,6 @@ type Manager struct {
 // @complexity 6
 // endregion FUNC_Manager_Run
 func (m *Manager) Run(ctx context.Context) {
-	type loop struct {
-		cancel  context.CancelFunc
-		chatIDs map[string]bool
-		apiBase string
-	}
-	current := map[string]*loop{} // bot_token -> running poller
-
 	type wantEntry struct {
 		chats   map[string]bool
 		apiBase string // from channel config api_url (tests); empty = official Bot API
@@ -90,18 +95,23 @@ func (m *Manager) Run(ctx context.Context) {
 		}
 
 		// Stop removed/changed pollers.
-		for token, lp := range current {
+		m.mu.Lock()
+		for token, lp := range m.current {
 			w, still := want[token]
 			if still && sameChats(lp.chatIDs, w.chats) && lp.apiBase == w.apiBase {
 				continue
 			}
 			lp.cancel()
-			delete(current, token)
+			delete(m.current, token)
 			logging.LDD(m.Logger, 7, "tgchat", "POLL_STOP", "token=***")
 		}
+		m.mu.Unlock()
 		// Start new ones (or restarted ones with a changed allowlist).
 		for token, w := range want {
-			if _, running := current[token]; running {
+			m.mu.Lock()
+			_, running := m.current[token]
+			m.mu.Unlock()
+			if running {
 				continue
 			}
 			pctx, cancel := context.WithCancel(ctx)
@@ -109,15 +119,18 @@ func (m *Manager) Run(ctx context.Context) {
 			for c := range w.chats {
 				chatIDs[c] = true
 			}
-			go (&poller{
+			pl := &poller{
 				api:      newBotAPI(token, w.apiBase),
 				allowed:  chatIDs,
 				st:       m.Store,
 				agent:    m.Agent,
 				approver: m.Approver,
 				logger:   m.Logger,
-			}).run(pctx)
-			current[token] = &loop{cancel: cancel, chatIDs: chatIDs, apiBase: w.apiBase}
+			}
+			go pl.run(pctx)
+			m.mu.Lock()
+			m.current[token] = &loop{cancel: cancel, chatIDs: chatIDs, apiBase: w.apiBase, p: pl}
+			m.mu.Unlock()
 			logging.LDD(m.Logger, 7, "tgchat", "POLL_START", "bot bridge started, chats="+strconv.Itoa(len(chatIDs)))
 			_ = audit.Append(m.Store.DB, m.Logger, audit.Entry{
 				Plane: audit.PlaneB, Action: "tg_chat_start", Success: true,
@@ -126,6 +139,9 @@ func (m *Manager) Run(ctx context.Context) {
 		}
 	}
 
+	m.mu.Lock()
+	m.current = map[string]*loop{}
+	m.mu.Unlock()
 	resync()
 	interval := m.ResyncEvery
 	if interval <= 0 {
@@ -138,10 +154,40 @@ func (m *Manager) Run(ctx context.Context) {
 		case <-t.C:
 			resync()
 		case <-ctx.Done():
-			for _, lp := range current {
+			m.mu.Lock()
+			for _, lp := range m.current {
 				lp.cancel()
 			}
+			m.mu.Unlock()
 			return
+		}
+	}
+}
+
+// region FUNC_Manager_MirrorWebTurn [DOMAIN(8): Integration; CONCEPT(7): WebToTelegram; TECH(6): fanout]
+// @purpose Relay a completed web chat turn to every ACTIVE telegram bridge (the operator sees the
+//
+//	web conversation in telegram without refreshing anything). No-op when no telegram channel has
+//	agent_chat_enabled on — setups without telegram are unaffected by design.
+//
+// @complexity 4
+// endregion FUNC_Manager_MirrorWebTurn
+func (m *Manager) MirrorWebTurn(ctx context.Context, user, assistant string, actionWatermark int64) {
+	m.mu.Lock()
+	loops := make([]*loop, 0, len(m.current))
+	for _, lp := range m.current {
+		loops = append(loops, lp)
+	}
+	m.mu.Unlock()
+	if len(loops) == 0 {
+		return
+	}
+	for _, lp := range loops {
+		if lp.p == nil {
+			continue
+		}
+		for chatID := range lp.p.allowed {
+			lp.p.mirrorTurn(ctx, chatID, user, assistant, actionWatermark)
 		}
 	}
 }
