@@ -1,4 +1,4 @@
-// Package auth — TOTP (RFC 6231) for two-factor authentication. Pure stdlib (HMAC-SHA1), no deps.
+// Package auth — TOTP (RFC 6238) for two-factor authentication. Pure stdlib (HMAC-SHA1), no deps.
 //
 // region MODULE_CONTRACT [DOMAIN(9): Security; CONCEPT(8): TOTP,2FA; TECH(8): crypto/hmac,base32]
 // @purpose Provide time-based one-time passwords for second-factor login, compatible with any

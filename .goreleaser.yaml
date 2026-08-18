@@ -26,6 +26,13 @@ builds:
       - -s -w -buildid=
       - -X main.Version={{ .Version }}
     mod_timestamp: '{{ .CommitTimestamp }}'
+    overrides:
+      - goos: windows
+        ldflags:
+          # -H=windowsgui hides the console window on Windows: prod runs headless (logs go to
+          # logs/vmpulse.log, stopping is via the web UI / net stop / taskkill).
+          - -s -w -buildid= -H=windowsgui
+          - -X main.Version={{ .Version }}
 
 archives:
   - id: default

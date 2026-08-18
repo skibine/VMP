@@ -37,7 +37,7 @@ build: web
 # Cross-compile a hardened Windows amd64 binary (pure-Go deps, no CGO) into dist/.
 build-windows: web
 	mkdir -p dist
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) -ldflags '$(LDFLAGS)' -o dist/vmpulse-windows-amd64.exe ./cmd/vmpulse
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(BUILDFLAGS) -ldflags '$(LDFLAGS) -H=windowsgui' -o dist/vmpulse-windows-amd64.exe ./cmd/vmpulse
 
 vet:
 	$(GO) vet $(PKG)
