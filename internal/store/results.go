@@ -64,7 +64,10 @@ func (s *Store) ListRecentResults(ctx context.Context, checkID int64, limit int)
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, check_id, ts, status, latency_ms, message, detail
-FROM check_results WHERE check_id=? ORDER BY ts DESC LIMIT ?`, checkID, limit)
+FROM check_results WHERE check_id=? ORDER BY ts DESC, id DESC LIMIT ?`, checkID, limit)
+	// BUG_FIX_CONTEXT: ts has millisecond precision (table default) — bursts of inserts in one
+	// millisecond tied on ts and returned arbitrary order; id (AUTOINCREMENT) is the stable
+	// newest-first tiebreak (broke fast CI runners).
 	if err != nil {
 		return nil, fmt.Errorf("ListRecentResults: %w", err)
 	}

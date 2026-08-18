@@ -298,7 +298,7 @@ func (s *Store) ListAlerts(ctx context.Context, limit int) ([]Alert, error) {
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, rule_id, check_id, vm_id, severity, message, triggered_at, COALESCE(acknowledged_at,''), delivery_log
-FROM alerts ORDER BY triggered_at DESC LIMIT ?`, limit)
+FROM alerts ORDER BY triggered_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("ListAlerts: %w", err)
 	}

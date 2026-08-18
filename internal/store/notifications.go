@@ -48,7 +48,7 @@ func (s *Store) ListNotifications(ctx context.Context, limit int) ([]Notificatio
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 SELECT id, title, body, kind, ref_id, created_at, COALESCE(read_at,'')
-FROM notifications ORDER BY (read_at IS NULL) DESC, created_at DESC LIMIT ?`, limit)
+FROM notifications ORDER BY (read_at IS NULL) DESC, created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("ListNotifications: %w", err)
 	}
