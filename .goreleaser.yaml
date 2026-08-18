@@ -26,11 +26,21 @@ builds:
       - -s -w -buildid=
       - -X main.Version={{ .Version }}
     mod_timestamp: '{{ .CommitTimestamp }}'
+    # BUG_FIX_CONTEXT: goreleaser v2.17+ silently DROPS an override that sets only goos -
+    # "overrides must set, at least, both 'goos' and 'goarch'" (a mere notice in `goreleaser
+    # check`, the build then falls back to base ldflags). v0.1.1 shipped console-window
+    # binaries because of this. List every windows target explicitly.
     overrides:
       - goos: windows
+        goarch: amd64
         ldflags:
           # -H=windowsgui hides the console window on Windows: prod runs headless (logs go to
           # logs/vmpulse.log, stopping is via the web UI / net stop / taskkill).
+          - -s -w -buildid= -H=windowsgui
+          - -X main.Version={{ .Version }}
+      - goos: windows
+        goarch: arm64
+        ldflags:
           - -s -w -buildid= -H=windowsgui
           - -X main.Version={{ .Version }}
 
