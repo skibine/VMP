@@ -15,8 +15,10 @@
 // @rationale
 // Q: One global thread instead of per-frontend/per-chat threads?
 // A: VM Pulse is a single-operator control room; the "sessions" problem the user reported is
-//    exactly what per-frontend histories create. One server-owned thread is the simplest model
-//    that makes every frontend a thin client.
+//
+//	exactly what per-frontend histories create. One server-owned thread is the simplest model
+//	that makes every frontend a thin client.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: ai chat history, shared conversation, append turn, trim, clear, telegram web
 // STRUCTURE: ▶ AppendChatTurn: ┌user+assistant┐ → ⊕ INSERT×2 → ∑ trim>200 → ⎋ ; List: SELECT … ORDER BY id DESC LIMIT n → ⊕ reverse

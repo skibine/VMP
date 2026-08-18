@@ -16,7 +16,9 @@
 // @rationale
 // Q: Why a VMDataReader interface instead of importing ssh directly?
 // A: The ai package must not import ssh (import cycle prevention, same pattern as ActionExecutor).
-//    main.go wires the dialer-backed implementation.
+//
+//	main.go wires the dialer-backed implementation.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: vm tools, diagnose, deep scan, exposures, site info, snapshot, errors, updates, inventory, vhosts, metrics, update_vm, mute
 // STRUCTURE: ▶ probes: ┌vm┐ → ⚡ monitor.* → ⎷ JSON ; ssh: ◇ ai_access? → ⚡ reader.X → ⎷ JSON ; update: ┌fields┐ → ○ merge → ⚡ UpdateVM → ⚡ audit → ⎷
@@ -326,18 +328,18 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"vm_id":           map[string]any{"type": "integer"},
-					"name":            map[string]any{"type": "string"},
-					"tags":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"notes":           map[string]any{"type": "string"},
-					"provider":        map[string]any{"type": "string"},
+					"vm_id":            map[string]any{"type": "integer"},
+					"name":             map[string]any{"type": "string"},
+					"tags":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"notes":            map[string]any{"type": "string"},
+					"provider":         map[string]any{"type": "string"},
 					"location_country": map[string]any{"type": "string"},
-					"location_city":   map[string]any{"type": "string"},
-					"cost_monthly":    map[string]any{"type": "number"},
-					"currency":        map[string]any{"type": "string"},
-					"alert_muted":     map[string]any{"type": "boolean"},
-					"metrics_enabled": map[string]any{"type": "boolean"},
-					"kind":            map[string]any{"type": "string", "description": "server | equipment"},
+					"location_city":    map[string]any{"type": "string"},
+					"cost_monthly":     map[string]any{"type": "number"},
+					"currency":         map[string]any{"type": "string"},
+					"alert_muted":      map[string]any{"type": "boolean"},
+					"metrics_enabled":  map[string]any{"type": "boolean"},
+					"kind":             map[string]any{"type": "string", "description": "server | equipment"},
 				},
 				"required": []string{"vm_id"},
 			},

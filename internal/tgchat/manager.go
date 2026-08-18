@@ -14,7 +14,9 @@
 // @rationale
 // Q: Why resync every 30s instead of watching a change feed?
 // A: The channels table is small and edited by hand; polling ListChannels twice a minute is
-//    negligible next to the long-poll loops themselves and needs zero new plumbing.
+//
+//	negligible next to the long-poll loops themselves and needs zero new plumbing.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: manager, resync, channels, poller lifecycle, bot_token, allowlist, agent_chat_enabled
 // STRUCTURE: ▶ ○ tick 30s → ○ ListChannels → ◇ agent_chat_enabled? → ⊕ wantSet keyed token → 〈diff curSet〉 → ▶ start / ⏹ stop → ⎋

@@ -37,7 +37,7 @@ func TestIsDestructiveCommand(t *testing.T) {
 	t.Logf("[IMP:8][TestDestructive][RESULT] blocked=%d allowed=%d", len(blocked), len(allowed))
 }
 
-// TestPrepareSudo verifies the non-interactive sudo rewrite: with a password -> `sudo -S -p ''`
+// TestPrepareSudo verifies the non-interactive sudo rewrite: with a password -> `sudo -S -p ”`
 // + password on stdin; without -> `sudo -n`; non-sudo and bare sudo pass through untouched.
 func TestPrepareSudo(t *testing.T) {
 	cases := []struct {
@@ -46,11 +46,11 @@ func TestPrepareSudo(t *testing.T) {
 		{"sudo apt install -y traceroute", "s3cr3t", "sudo -S -p '' apt install -y traceroute", "s3cr3t\n"},
 		{"  sudo systemctl restart nginx ", "p", "sudo -S -p '' systemctl restart nginx", "p\n"},
 		{"sudo -u root whoami", "pw", "sudo -S -p '' -u root whoami", "pw\n"},
-		{"sudo apt update", "", "sudo -n apt update", ""},                // no password -> passwordless
-		{"apt update", "pw", "apt update", ""},                           // not sudo -> untouched
-		{"ls -la", "", "ls -la", ""},                                     // plain command
-		{"sudo", "pw", "sudo", ""},                                       // bare sudo -> no injection
-		{"cat /etc/sudoers", "pw", "cat /etc/sudoers", ""},               // "sudo" substring, not token
+		{"sudo apt update", "", "sudo -n apt update", ""},  // no password -> passwordless
+		{"apt update", "pw", "apt update", ""},             // not sudo -> untouched
+		{"ls -la", "", "ls -la", ""},                       // plain command
+		{"sudo", "pw", "sudo", ""},                         // bare sudo -> no injection
+		{"cat /etc/sudoers", "pw", "cat /etc/sudoers", ""}, // "sudo" substring, not token
 	}
 	for _, c := range cases {
 		gotCmd, gotStdin := prepareSudo(c.cmd, c.pw)

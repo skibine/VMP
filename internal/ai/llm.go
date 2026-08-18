@@ -32,8 +32,8 @@ import (
 // @purpose One chat message. Marshals directly to the OpenAI-compatible message format.
 // endregion STRUCT_Message
 type Message struct {
-	Role       string     `json:"role"`              // system | user | assistant | tool
-	Content    string     `json:"content"`           // text — ALWAYS emitted (string), never omitted
+	Role       string     `json:"role"`    // system | user | assistant | tool
+	Content    string     `json:"content"` // text — ALWAYS emitted (string), never omitted
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }

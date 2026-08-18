@@ -89,10 +89,10 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux.HandleFunc("POST /api/ai/chat", srv.aiChat) // TODO(auth): gate in Plane B session middleware
 	mux.HandleFunc("GET /api/ai/history", srv.aiHistory)
 	mux.HandleFunc("DELETE /api/ai/history", srv.aiHistoryClear)
-	srv.crud = RegisterCRUD(mux, s, logger)          // TODO(auth): wrap CRUD routes with Plane B session middleware
-	registerWebSSH(mux, s, logger)                  // Plane B: web-ssh terminal + snapshot + hostkey reset
-	registerMetrics(mux, s, logger)                 // Plane A: metrics series + pull-poller toggle
-	registerSPA(mux)                                // catch-all "/" serves the embedded frontend
+	srv.crud = RegisterCRUD(mux, s, logger) // TODO(auth): wrap CRUD routes with Plane B session middleware
+	registerWebSSH(mux, s, logger)          // Plane B: web-ssh terminal + snapshot + hostkey reset
+	registerMetrics(mux, s, logger)         // Plane A: metrics series + pull-poller toggle
+	registerSPA(mux)                        // catch-all "/" serves the embedded frontend
 	srv.srv = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	return srv
 }

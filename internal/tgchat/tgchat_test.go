@@ -29,15 +29,15 @@ import (
 // fakeBot is an httptest Bot API: it records every sendMessage/edit/answer call and can hand
 // queued updates to getUpdates.
 type fakeBot struct {
-	mu        sync.Mutex
-	sent      []string // sendMessage bodies
-	edits     []string // editMessageText bodies
-	answers   []string // answerCallbackQuery texts
-	markups   []string // sendMessage reply_markup payloads
-	updates   []tgUpdate
-	nextID    int64
-	conflict  bool // when true, getUpdates answers 409
-	approver  *fakeApprover
+	mu       sync.Mutex
+	sent     []string // sendMessage bodies
+	edits    []string // editMessageText bodies
+	answers  []string // answerCallbackQuery texts
+	markups  []string // sendMessage reply_markup payloads
+	updates  []tgUpdate
+	nextID   int64
+	conflict bool // when true, getUpdates answers 409
+	approver *fakeApprover
 }
 
 func (f *fakeBot) handler(w http.ResponseWriter, r *http.Request) {
@@ -151,11 +151,11 @@ func (m *mockAsker) Ask(ctx context.Context, message string, history []ai.Messag
 
 // fakeApprover stands in for api.Server.ApproveAIAction.
 type fakeApprover struct {
-	mu      sync.Mutex
-	called  []int64
-	status  string
-	output  string
-	err     error
+	mu     sync.Mutex
+	called []int64
+	status string
+	output string
+	err    error
 }
 
 func (f *fakeApprover) ApproveAIAction(ctx context.Context, id int64, via string) (string, string, error) {
@@ -275,8 +275,8 @@ func TestPoller_AnnouncesPendingWithButtons(t *testing.T) {
 
 // askerThatProposes creates a pending action DURING the turn (as propose_command would).
 type askerThatProposes struct {
-	st   *store.Store
-	vmID int64
+	st    *store.Store
+	vmID  int64
 	reply string
 }
 

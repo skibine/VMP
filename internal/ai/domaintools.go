@@ -48,7 +48,7 @@ func DomainTools(s *store.Store) []Tool {
 						"id": d.ID, "name": d.Name, "registrar": d.Registrar,
 						"monitor_dns": d.MonitorDNS, "monitor_whois": d.MonitorWhois, "monitor_tls": d.MonitorTLS,
 						"cert_notify_days": d.CertNotifyDays, "owner_notify_days": d.OwnerNotifyDays,
-						"checks":          map[string]any{},
+						"checks": map[string]any{},
 					}
 					if rows, err := s.LatestResultsForDomain(ctx, d.ID); err == nil {
 						checks := map[string]any{}

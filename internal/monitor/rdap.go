@@ -9,10 +9,13 @@
 // @invariants
 //   - Unknown/missing expiry => DaysRemaining=-1 (never 0, which would read as "expired").
 //   - Never raises; on any error it returns an error so the caller can degrade to unknown.
+//
 // @rationale
-//   Q: Why a network bootstrap instead of a hardcoded server list?
-//   A: The RDAP bootstrap is the authoritative, up-to-date mapping of suffix -> RDAP base URL, so
-//      any zone (not just .pro) resolves without per-TLD maintenance.
+//
+//	Q: Why a network bootstrap instead of a hardcoded server list?
+//	A: The RDAP bootstrap is the authoritative, up-to-date mapping of suffix -> RDAP base URL, so
+//	   any zone (not just .pro) resolves without per-TLD maintenance.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: rdap, whois fallback, registration expiry, bootstrap, identitydigital, dns.json
 // STRUCTURE: ▶ ┌domain┐ → ○ bootstrap(suffix→base, cached) → ⚡ GET {base}/domain/{name} → ⊕ parse events → ⎷ WhoisInfo
@@ -44,10 +47,10 @@ var rdapFallbackBase = "https://rdap.org"
 var rdapClient = &http.Client{Timeout: 8 * time.Second}
 
 var (
-	rdapCacheMu   sync.Mutex
-	rdapCache     map[string]string
-	rdapCachedAt  time.Time
-	rdapCacheTTL  = 24 * time.Hour
+	rdapCacheMu  sync.Mutex
+	rdapCache    map[string]string
+	rdapCachedAt time.Time
+	rdapCacheTTL = 24 * time.Hour
 )
 
 // region FUNC_rdapBaseURL [DOMAIN(7): Observability; CONCEPT(6): Bootstrap; TECH(6): net/http]
@@ -186,13 +189,13 @@ func rdapFetch(ctx context.Context, base, domain string) (WhoisInfo, error) {
 		return WhoisInfo{Status: "error", Error: "rdap http " + resp.Status}, nil
 	}
 	var obj struct {
-		Events   []struct {
+		Events []struct {
 			EventAction string `json:"eventAction"`
 			EventDate   string `json:"eventDate"`
 		} `json:"events"`
 		Entities []struct {
-			Roles     []string `json:"roles"`
-			VCardArray []any   `json:"vcardArray"`
+			Roles      []string `json:"roles"`
+			VCardArray []any    `json:"vcardArray"`
 		} `json:"entities"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&obj); err != nil {

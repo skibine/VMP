@@ -78,8 +78,11 @@ func TestDomainEvaluator_DeletesOneShotAfterChannel(t *testing.T) {
 // external push fails, so the evaluator retries it on the next tick instead of dropping the alert.
 type failingChannel struct{ n int }
 
-func (*failingChannel) Type() string                       { return "fail" }
-func (f *failingChannel) Deliver(context.Context, map[string]any, Message) error { f.n++; return fmt.Errorf("boom") }
+func (*failingChannel) Type() string { return "fail" }
+func (f *failingChannel) Deliver(context.Context, map[string]any, Message) error {
+	f.n++
+	return fmt.Errorf("boom")
+}
 
 // region FUNC_test_DomainEvaluator_OneShotRetriesOnChannelFail [DOMAIN(7): Testing; CONCEPT(8): Retry; TECH(7): evaluator]
 // @purpose A one-shot reminder whose external channel delivery fails must survive (not be deleted,

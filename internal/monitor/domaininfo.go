@@ -60,13 +60,13 @@ type CertInfo struct {
 
 // WhoisInfo is the parsed registrar record.
 type WhoisInfo struct {
-	Registrar    string `json:"registrar"`
-	Created      string `json:"created"`
-	Expiry       string `json:"expiry"`
-	DaysRemaining int   `json:"days_remaining"` // -1 when expiry unparseable
-	Status       string `json:"status"` // ok | error
-	Error        string `json:"error,omitempty"`
-	Note         string `json:"note,omitempty"` // e.g. "parent zone: example.top" for 3LD lookups
+	Registrar     string `json:"registrar"`
+	Created       string `json:"created"`
+	Expiry        string `json:"expiry"`
+	DaysRemaining int    `json:"days_remaining"` // -1 when expiry unparseable
+	Status        string `json:"status"`         // ok | error
+	Error         string `json:"error,omitempty"`
+	Note          string `json:"note,omitempty"` // e.g. "parent zone: example.top" for 3LD lookups
 }
 
 // expiryDateLayouts are the common registrar date formats (tried in order). Whois responses vary

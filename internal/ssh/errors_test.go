@@ -1,4 +1,5 @@
 package ssh
+
 import "strings"
 
 import (

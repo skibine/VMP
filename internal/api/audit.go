@@ -15,7 +15,9 @@
 // @rationale
 // Q: Why category prefixes instead of a category column?
 // A: audit_log.action already encodes the family (auth.*, ai_*, ssh_*, tg_chat_*, service.*);
-//    a derived category keeps writes unchanged and the migration set empty.
+//
+//	a derived category keeps writes unchanged and the migration set empty.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: audit, events, log viewer, filters, pagination, clear, verify chain, category
 // STRUCTURE: ▶ GET: ┌query params┐ → ◇ build WHERE → ⚡ COUNT + page SELECT → ⊕ {events,total} ; DELETE: ┌before?┐ → ⚡ DELETE [AND ts<] → ⎋

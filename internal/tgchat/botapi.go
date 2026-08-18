@@ -39,16 +39,16 @@ const defaultBotAPIBase = "https://api.telegram.org"
 
 // tgUpdate is one Bot API update (a message or a button callback).
 type tgUpdate struct {
-	UpdateID      int64      `json:"update_id"`
-	Message       *tgMessage `json:"message"`
+	UpdateID      int64       `json:"update_id"`
+	Message       *tgMessage  `json:"message"`
 	CallbackQuery *tgCallback `json:"callback_query"`
 }
 
 // tgMessage is a chat message (only Text is handled; stickers/photos are ignored).
 type tgMessage struct {
-	MessageID int64    `json:"message_id"`
+	MessageID int64     `json:"message_id"`
 	Chat      tgChatRef `json:"chat"`
-	Text      string   `json:"text"`
+	Text      string    `json:"text"`
 }
 
 // tgChatRef identifies the chat a message belongs to.
@@ -151,8 +151,8 @@ func (b *botAPI) call(ctx context.Context, method string, params url.Values, out
 		return nil
 	}
 	var envelope struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
+		OK          bool            `json:"ok"`
+		Description string          `json:"description"`
 		Result      json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {

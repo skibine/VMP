@@ -10,6 +10,7 @@
 //   - Audit never writes or persists; collectors only read /proc, /etc, and run read-only probes.
 //   - Any single collector failure is swallowed (recorded in a Note), so the report is always whole.
 //   - External probes (PortScan/Exposures) run only when a public IP was discovered.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: host audit, doctor, Audit, privilege, network posture, public ip, asn, firewall, risk
 // STRUCTURE: ▶ Audit → ○ Privilege+Context+Network+SSH+Firewall+Ports ─┬─ ⊕ PortScan(publicIP) ─┼─ ⊕ Exposures(publicIP) ── ∑ Risk → ⎷ HostReport
@@ -32,9 +33,9 @@ import (
 type Privilege struct {
 	UID               int    `json:"uid"`
 	User              string `json:"user"`
-	Root              bool   `json:"root"`               // unix uid==0
-	Elevated          bool   `json:"elevated"`           // windows admin / unix root — "service should not run elevated"
-	ViaSudo           string `json:"via_sudo"`           // SUDO_USER when invoked through sudo
+	Root              bool   `json:"root"`                // unix uid==0
+	Elevated          bool   `json:"elevated"`            // windows admin / unix root — "service should not run elevated"
+	ViaSudo           string `json:"via_sudo"`            // SUDO_USER when invoked through sudo
 	CanBindPrivileged bool   `json:"can_bind_privileged"` // can bind ports <1024 (root on Linux)
 }
 
@@ -72,7 +73,7 @@ type EngineState struct {
 // a list of per-engine states (cross-platform: Linux engines + Windows Firewall).
 type FirewallState struct {
 	Engines  []EngineState `json:"engines"`
-	Rules    int           `json:"rules"`     // rule lines seen (iptables+nft) when readable
+	Rules    int           `json:"rules"` // rule lines seen (iptables+nft) when readable
 	Fail2ban bool          `json:"fail2ban"`
 	Note     string        `json:"note,omitempty"`
 }

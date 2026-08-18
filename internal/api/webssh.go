@@ -37,8 +37,8 @@ import (
 // Defaults applied in registerWebSSH; main.go overrides them from config via SetWebSSHDefaults
 // before api.New wires the routes.
 var (
-	webSSHSessionLimit = 3                   // max concurrent interactive terminals per user
-	webSSHIdleTimeout  = 30 * time.Minute    // idle reaper; mirrored onto the ssh.Dialer
+	webSSHSessionLimit = 3                // max concurrent interactive terminals per user
+	webSSHIdleTimeout  = 30 * time.Minute // idle reaper; mirrored onto the ssh.Dialer
 )
 
 // SetWebSSHDefaults overrides the web-SSH session limit and idle timeout from config. No-op for

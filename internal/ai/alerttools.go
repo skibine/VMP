@@ -18,8 +18,10 @@
 // @rationale
 // Q: Why does coverage check consider mutes?
 // A: A fleet-wide (vm_id=nil) enabled rule does NOT fire for a muted VM (evaluator skips muted
-//    VMs in fleet-wide scope), so "global rule exists" is not enough — the VM must be unmuted or
-//    have its own scoped rule. Scoped rules always fire, mute only dampens fleet-wide ones.
+//
+//	VMs in fleet-wide scope), so "global rule exists" is not enough — the VM must be unmuted or
+//	have its own scoped rule. Scoped rules always fire, mute only dampens fleet-wide ones.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: alert tools, set_vm_alert_channels, ensure_liveness_rule, list_channels, list_alert_rules, notifications setup, ai
 // STRUCTURE: ▶ set_vm_alert_channels: ┌vm+names/ids┐ → ◇ resolve channels → ⚡ SetVMChannels → ⚡ audit → ⎷ JSON ; ensure_liveness_rule: ┌vm┐ → 〈covered?〉 → ⚡ CreateAlertRule → ⚡ audit → ⎷ JSON
@@ -148,7 +150,7 @@ func AlertTools(s *store.Store) []Tool {
 						avail = append(avail, c.Name)
 					}
 					return jsonStr(map[string]any{
-						"error": "unknown channel(s): " + strings.Join(unknown, ", "),
+						"error":     "unknown channel(s): " + strings.Join(unknown, ", "),
 						"available": avail,
 					})
 				}

@@ -7,6 +7,7 @@
 // @io (HostReport, Writer) -> text ; (HostReport) -> JSON bytes
 // @invariants
 //   - Plain text output contains NO secrets (only ports, config flags, IP, ASN, distro).
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: print, render, doctor report, ansi, json, verdict, findings
 package install

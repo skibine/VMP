@@ -221,10 +221,10 @@ func (a *crudAPI) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Type    string                 `json:"type"`
-		Name    string                 `json:"name"`
-		Config  map[string]any         `json:"config"`
-		Enabled *bool                  `json:"enabled"`
+		Type    string         `json:"type"`
+		Name    string         `json:"name"`
+		Config  map[string]any `json:"config"`
+		Enabled *bool          `json:"enabled"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -327,7 +327,7 @@ func (a *crudAPI) testChannel(w http.ResponseWriter, r *http.Request) {
 	if ch.Type == "in-app" {
 		_, derr := a.st.CreateNotification(r.Context(), store.Notification{
 			Title: "✅ VM Pulse: channel test", Body: "If you see this, the in-app channel is working.",
-			Kind:  "test",
+			Kind: "test",
 		})
 		if derr != nil {
 			logging.LDD(a.logger, 8, "testChannel", "INAPP_FAIL", derr.Error())

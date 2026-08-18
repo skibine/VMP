@@ -49,7 +49,8 @@ import (
 // endregion FUNC_main
 
 // Version is the build version stamp. Overridden at release via
-//   -ldflags "-X 'main.Version=<tag>-<sha>'"  (see Makefile). "dev" for local builds.
+//
+//	-ldflags "-X 'main.Version=<tag>-<sha>'"  (see Makefile). "dev" for local builds.
 var Version = "dev"
 
 func main() {

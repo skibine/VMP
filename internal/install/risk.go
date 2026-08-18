@@ -9,6 +9,7 @@
 // @invariants
 //   - Risk NEVER performs IO; it reads only the supplied report.
 //   - A critical finding always yields severity "critical", regardless of score.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: risk, verdict, severity, score, findings, recommendations, datacenter, root, firewall
 package install
@@ -21,8 +22,8 @@ import (
 
 // Verdict is the audit's bottom line.
 type Verdict struct {
-	Severity string       `json:"severity"` // ok | warn | critical
-	Score    int          `json:"score"`    // 0–100, higher = riskier
+	Severity string        `json:"severity"` // ok | warn | critical
+	Score    int           `json:"score"`    // 0–100, higher = riskier
 	Findings []RiskFinding `json:"findings"`
 }
 

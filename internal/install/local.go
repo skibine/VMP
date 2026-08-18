@@ -9,6 +9,7 @@
 // @invariants
 //   - Collectors NEVER write or exec; they only read /proc and /etc.
 //   - A missing/unreadable file yields a zero struct (no error) — the audit stays best-effort.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: host audit, doctor, os-release, /proc/net/tcp, listening ports, sshd_config, posture
 // STRUCTURE: ▶ ┌path┐ → ○ read → ⚡ parse (kv/columns) → ⊕ struct → ⎋ return

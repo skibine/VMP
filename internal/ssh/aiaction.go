@@ -30,7 +30,7 @@ import (
 //
 // sudo handling: the AI executor is non-interactive (no PTY), so a sudo password prompt cannot be
 // answered. If the command's first token is `sudo`:
-//   - sudoPassword != "" -> rewrite to `sudo -S -p '' <rest>` and feed the password on stdin (one
+//   - sudoPassword != "" -> rewrite to `sudo -S -p ” <rest>` and feed the password on stdin (one
 //     line). This lets the AI install packages / restart services when the operator stored a sudo
 //     password for the VM.
 //   - sudoPassword == "" -> rewrite to `sudo -n <rest>` (passwordless / NOPASSWD sudoers entry);

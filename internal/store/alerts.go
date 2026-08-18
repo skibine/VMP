@@ -321,13 +321,13 @@ FROM alerts ORDER BY triggered_at DESC LIMIT ?`, limit)
 
 // AlertFilter drives ListAlertsFiltered (the bell modal's "alerts" tab).
 type AlertFilter struct {
-	Severity   string // warning | critical | "" = all
-	VMID       *int64 // nil = all servers
-	From       string // YYYY-MM-DD inclusive
-	To         string // YYYY-MM-DD inclusive
-	UnackOnly  bool   // only rows not yet acknowledged (tab unread counter)
-	Limit      int
-	Offset     int
+	Severity  string // warning | critical | "" = all
+	VMID      *int64 // nil = all servers
+	From      string // YYYY-MM-DD inclusive
+	To        string // YYYY-MM-DD inclusive
+	UnackOnly bool   // only rows not yet acknowledged (tab unread counter)
+	Limit     int
+	Offset    int
 }
 
 // region FUNC_ListAlertsFiltered [DOMAIN(8): Alerting; CONCEPT(7): ReadHistory; TECH(6): database/sql]
@@ -444,7 +444,8 @@ func (s *Store) DeleteAlerts(ctx context.Context, before string) (int64, error) 
 
 // LastAlertFor returns the triggered_at of the most recent alert for (ruleID, checkID),
 // and false when none exists (used by the evaluator for cooldown).
-func (s *Store) LastAlertFor(ctx context.Context, ruleID, checkID int64) (string, bool, error) {	var ts string
+func (s *Store) LastAlertFor(ctx context.Context, ruleID, checkID int64) (string, bool, error) {
+	var ts string
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT triggered_at FROM alerts WHERE rule_id=? AND check_id=? ORDER BY triggered_at DESC LIMIT 1`,
 		ruleID, checkID).Scan(&ts)

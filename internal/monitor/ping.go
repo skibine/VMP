@@ -54,8 +54,9 @@ func (PingChecker) Type() string { return "ping" }
 //   - "ms"            English ("time=135ms")
 //   - "мсек"/"мс"     Russian in UTF-8 (modern consoles)
 //   - 0xAC 0xE1 ...   Russian "мс"/"мсек" in the cp866 OEM codepage (default RU Windows console) —
-//                     those bytes are NOT valid UTF-8, so without them latency parses as 0 on RU Windows.
+//     those bytes are NOT valid UTF-8, so without them latency parses as 0 on RU Windows.
 //   - 0xEC 0xF1       Russian "мс" in cp1251.
+//
 // TTL/bytes numbers lack a unit, so they never match. Parsed byte-level (not via regexp) because Go's
 // regexp works on UTF-8 runes and cannot match the raw cp866 bytes of Russian "мс" (invalid UTF-8).
 //

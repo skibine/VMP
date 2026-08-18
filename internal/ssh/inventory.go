@@ -40,19 +40,19 @@ echo =svcs=; (systemctl list-units --type=service --state=running --no-legend 2>
 
 // Inventory is a parsed VPS profile (static facts).
 type Inventory struct {
-	OS           string   `json:"os"`
-	Kernel       string   `json:"kernel"`
-	Arch         string   `json:"arch"`
-	CPUModel     string   `json:"cpu_model"`
-	MemTotalMB   int      `json:"mem_total_mb"`
-	SwapTotalMB  int      `json:"swap_total_mb"`
-	Uptime       string   `json:"uptime"`
-	Ports        []int    `json:"ports"`
+	OS           string      `json:"os"`
+	Kernel       string      `json:"kernel"`
+	Arch         string      `json:"arch"`
+	CPUModel     string      `json:"cpu_model"`
+	MemTotalMB   int         `json:"mem_total_mb"`
+	SwapTotalMB  int         `json:"swap_total_mb"`
+	Uptime       string      `json:"uptime"`
+	Ports        []int       `json:"ports"`
 	Docker       []Container `json:"docker"`
-	Packages     int      `json:"packages"`
-	PackagesList []string `json:"packages_list"`
-	Services     int      `json:"services"`
-	ServicesList []string `json:"services_list"`
+	Packages     int         `json:"packages"`
+	PackagesList []string    `json:"packages_list"`
+	Services     int         `json:"services"`
+	ServicesList []string    `json:"services_list"`
 }
 
 // Container is one docker container parsed from `docker ps` (name|image|status|ports).

@@ -16,8 +16,10 @@
 // @rationale
 // Q: Why announce pending actions by id-watermark instead of hooking propose_command?
 // A: The ai package must stay transport-agnostic. The poller snapshots max(action id) before the
-//    Ask call and reports pending rows with a higher id after it — zero coupling, and it also
-//    catches proposals made by the web chat in the same window (the chat is a control room).
+//
+//	Ask call and reports pending rows with a higher id after it — zero coupling, and it also
+//	catches proposals made by the web chat in the same window (the chat is a control room).
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: poller, getUpdates, long-poll, allowlist, history, typing, watermark, callback, buttons
 // STRUCTURE: ▶ ┌skip backlog┐ → ○ loop ⚡getUpdates(25s) → 〈message? ◇allowed → ⚡typing → Ask → ⊕split → sendMessage → ⊕pending>watermark → ✅❌ ; callback → Approver〉 → ⎋
@@ -281,7 +283,7 @@ func (p *poller) handleCallback(ctx context.Context, cb *tgCallback) {
 		msgID = cb.Message.MessageID
 	}
 	if chatID == "" || !p.allowed[chatID] {
-		logging.LDD(p.logger, 9, "tgchat", "CALLBACK_DENIED", "chat_id=" + chatID)
+		logging.LDD(p.logger, 9, "tgchat", "CALLBACK_DENIED", "chat_id="+chatID)
 		return
 	}
 

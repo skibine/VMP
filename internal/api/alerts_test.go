@@ -104,10 +104,10 @@ func TestHTTP_AlertsList(t *testing.T) {
 // endregion FUNC_test_validateChannelConfig
 func TestValidateChannelConfig(t *testing.T) {
 	cases := []struct {
-		name  string
-		typ   string
-		cfg   map[string]any
-		bad   bool
+		name string
+		typ  string
+		cfg  map[string]any
+		bad  bool
 	}{
 		{"telegram default ok", "telegram", map[string]any{"bot_token": "x"}, false},
 		{"telegram official api_url ok", "telegram", map[string]any{"api_url": "https://api.telegram.org"}, false},

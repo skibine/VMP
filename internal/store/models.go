@@ -19,8 +19,8 @@ package store
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"net"
+	"strings"
 )
 
 // region STRUCT_ValidationError [DOMAIN(7): Validation; CONCEPT(6): Error; TECH(5): struct]
@@ -144,25 +144,25 @@ func (c Check) Validate() error {
 // @purpose Represent a monitored domain (DNS/whois/TLS checks attach to it).
 // endregion STRUCT_Domain
 type Domain struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Registrar      string `json:"registrar"`
-	AutoDiscovered bool   `json:"auto_discovered"`
-	VMID           *int64 `json:"vm_id"`
-	MonitorDNS     bool   `json:"monitor_dns"`
-	MonitorWhois   bool   `json:"monitor_whois"`
-	MonitorTLS     bool   `json:"monitor_tls"`
-	CertNotifyDays  int    `json:"cert_notify_days"`
-	OwnerNotifyDays int    `json:"owner_notify_days"`
-	CertLastNotified  string `json:"cert_last_notified_at"`
-	OwnerLastNotified string `json:"owner_last_notified_at"`
+	ID                   int64  `json:"id"`
+	Name                 string `json:"name"`
+	Registrar            string `json:"registrar"`
+	AutoDiscovered       bool   `json:"auto_discovered"`
+	VMID                 *int64 `json:"vm_id"`
+	MonitorDNS           bool   `json:"monitor_dns"`
+	MonitorWhois         bool   `json:"monitor_whois"`
+	MonitorTLS           bool   `json:"monitor_tls"`
+	CertNotifyDays       int    `json:"cert_notify_days"`
+	OwnerNotifyDays      int    `json:"owner_notify_days"`
+	CertLastNotified     string `json:"cert_last_notified_at"`
+	OwnerLastNotified    string `json:"owner_last_notified_at"`
 	CertNotifyChannelID  int    `json:"cert_notify_channel_id"`
 	OwnerNotifyChannelID int    `json:"owner_notify_channel_id"`
 	DNSNotifyEnabled     bool   `json:"dns_notify_enabled"`
 	DNSNotifyChannelID   int    `json:"dns_notify_channel_id"`
 	DNSLastSignature     string `json:"dns_last_signature"`
 	DNSLastNotified      string `json:"dns_last_notified_at"`
-	CreatedAt      string `json:"created_at"`
+	CreatedAt            string `json:"created_at"`
 }
 
 // Notification is one in-app notification row (reminder delivery channel "in-app").
@@ -179,14 +179,14 @@ type Notification struct {
 // DomainReminder is one expiry/change reminder attached to a domain. A domain may have several
 // per kind (e.g. cert at 30d and at 7d). repeat_days>0 re-fires while triggered.
 type DomainReminder struct {
-	ID            int64  `json:"id"`
-	DomainID      int64  `json:"domain_id"`
-	Kind          string `json:"kind"`           // cert | owner | dns
-	Days          int    `json:"days"`           // threshold (0 for dns)
-	ChannelID     int    `json:"channel_id"`     // 0 = in-app only
-	RepeatDays    int    `json:"repeat_days"`    // 0 = once; >0 = re-notify interval
-	LastNotified  string `json:"last_notified_at"`
-	CreatedAt     string `json:"created_at"`
+	ID           int64  `json:"id"`
+	DomainID     int64  `json:"domain_id"`
+	Kind         string `json:"kind"`        // cert | owner | dns
+	Days         int    `json:"days"`        // threshold (0 for dns)
+	ChannelID    int    `json:"channel_id"`  // 0 = in-app only
+	RepeatDays   int    `json:"repeat_days"` // 0 = once; >0 = re-notify interval
+	LastNotified string `json:"last_notified_at"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // region FUNC_Domain_Validate [DOMAIN(7): Validation; CONCEPT(6): Rules; TECH(3): pure]

@@ -131,7 +131,7 @@ func looksLikeDatacenter(org, isp, domain, ptr string) bool {
 }
 
 func parseFloat(s string) (float64, error) { return strconv.ParseFloat(s, 64) }
-func itoa(n int) string                     { return strconv.Itoa(n) }
+func itoa(n int) string                    { return strconv.Itoa(n) }
 func boolStr(b bool) string {
 	if b {
 		return "true"

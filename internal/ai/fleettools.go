@@ -16,9 +16,11 @@
 // @rationale
 // Q: Why immediate execution instead of the propose/approve queue used for commands?
 // A: The approval queue exists for SSH command execution (destructive potential, Plane B). Adding a
-//    monitor target cannot destroy anything and is trivially reversible in the UI; gating it behind
-//    approval would break the conversational flow ("поставь на мониторинг" -> done) that operators
-//    expect from a chat frontend, while the audit chain still records who/what/when.
+//
+//	monitor target cannot destroy anything and is trivially reversible in the UI; gating it behind
+//	approval would break the conversational flow ("поставь на мониторинг" -> done) that operators
+//	expect from a chat frontend, while the audit chain still records who/what/when.
+//
 // endregion MODULE_CONTRACT
 // GREP_SUMMARY: add_vm, add_domain, fleet mutator, monitoring, audit, ai tools, plane a
 // STRUCTURE: ▶ add_vm: ┌{name,hostname,ip,port}┐ → ○ CreateVM → ⊕ EnsureSystem* → ⚡ audit → ⎷ JSON ; add_domain: ┌{name}┐ → ◇ duplicate? → ⊕ EnsureDomainChecks → ⚡ audit → ⎷ JSON
@@ -142,7 +144,6 @@ func auditAppendAI(s *store.Store, action, targetType, targetID string, success 
 		Success: success,
 	})
 }
-
 
 // isIPLike reports whether s looks like a dotted-quad or IPv6 literal (no DNS lookup).
 func isIPLike(s string) bool {

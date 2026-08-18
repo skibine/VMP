@@ -74,7 +74,8 @@ func (a *crudAPI) setLocale(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"locale": body.Locale})
 }
 
-func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {	cfg, err := a.st.GetAIConfig(r.Context())
+func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {
+	cfg, err := a.st.GetAIConfig(r.Context())
 	if err != nil {
 		a.writeErr(w, "getAISettings", err)
 		return

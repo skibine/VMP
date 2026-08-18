@@ -97,7 +97,7 @@ func (LivenessChecker) Run(ctx context.Context, target string, params map[string
 	// was seen (the host gave no ICMP reply, no SSH/TCP connection, no HTTP(S) response).
 	return Result{Status: StatusCritical,
 		Message: "host unreachable: no ping reply, no ssh, no http/https response",
-		Detail: map[string]any{"checked": []string{"ping", "ssh", "web", "tls"}}}
+		Detail:  map[string]any{"checked": []string{"ping", "ssh", "web", "tls"}}}
 }
 
 // (net import kept for potential future use / JoinHostPort consistency.)

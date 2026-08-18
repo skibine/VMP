@@ -124,7 +124,7 @@ var expHTTP = &http.Client{Timeout: probeTimeout}
 // expHTTPS skips cert verification: the goal is to confirm a service responds, not to trust it
 // (k8s API uses self-signed cluster certs; .git/.env may sit behind https with any cert).
 var expHTTPS = &http.Client{
-	Timeout: probeTimeout,
+	Timeout:   probeTimeout,
 	Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 }
 
@@ -325,7 +325,9 @@ func weakTLSAt(ctx context.Context, addr string) *Finding {
 
 // --- extended probe set (common no-auth / RCE-grade exposures) ---
 
-func probeMongoDB(ctx context.Context, host string) *Finding { return mongoAt(ctx, net.JoinHostPort(host, "27017")) }
+func probeMongoDB(ctx context.Context, host string) *Finding {
+	return mongoAt(ctx, net.JoinHostPort(host, "27017"))
+}
 func mongoAt(ctx context.Context, addr string) *Finding {
 	// Send a legacy OP_QUERY {isMaster:1}; an exposed MongoDB answers with server info (BSON).
 	d := net.Dialer{}
@@ -356,7 +358,7 @@ func mongoIsMasterQuery() []byte {
 		1, 0, 0, 0, 0}
 	body := []byte{0, 0, 0, 0} // flags
 	body = append(body, []byte("admin.$cmd")...)
-	body = append(body, 0)        // NUL terminator
+	body = append(body, 0)          // NUL terminator
 	body = append(body, 0, 0, 0, 0) // numberToSkip
 	body = append(body, 1, 0, 0, 0) // numberToReturn = 1
 	body = append(body, bson...)
@@ -380,7 +382,9 @@ func etcdAt(ctx context.Context, baseURL string) *Finding {
 	return nil
 }
 
-func probeCouchDB(ctx context.Context, host string) *Finding { return couchAt(ctx, "http://"+host+":5984") }
+func probeCouchDB(ctx context.Context, host string) *Finding {
+	return couchAt(ctx, "http://"+host+":5984")
+}
 func couchAt(ctx context.Context, baseURL string) *Finding {
 	st, body, err := httpGet(ctx, expHTTP, baseURL+"/")
 	if err != nil || st != 200 {
@@ -394,7 +398,9 @@ func couchAt(ctx context.Context, baseURL string) *Finding {
 	return nil
 }
 
-func probeRabbitMQ(ctx context.Context, host string) *Finding { return rabbitAt(ctx, "http://"+host+":15672") }
+func probeRabbitMQ(ctx context.Context, host string) *Finding {
+	return rabbitAt(ctx, "http://"+host+":15672")
+}
 func rabbitAt(ctx context.Context, baseURL string) *Finding {
 	st, body, err := httpGet(ctx, expHTTP, baseURL+"/api/overview")
 	if err != nil {
@@ -412,7 +418,9 @@ func rabbitAt(ctx context.Context, baseURL string) *Finding {
 	return nil
 }
 
-func probeClickHouse(ctx context.Context, host string) *Finding { return clickAt(ctx, "http://"+host+":8123") }
+func probeClickHouse(ctx context.Context, host string) *Finding {
+	return clickAt(ctx, "http://"+host+":8123")
+}
 func clickAt(ctx context.Context, baseURL string) *Finding {
 	st, _, err := httpGet(ctx, expHTTP, baseURL+"/")
 	if err != nil || st != 200 {
@@ -443,7 +451,9 @@ func probeActuator(ctx context.Context, host string) *Finding {
 	return nil
 }
 
-func probeFTP(ctx context.Context, host string) *Finding { return ftpAt(ctx, net.JoinHostPort(host, "21")) }
+func probeFTP(ctx context.Context, host string) *Finding {
+	return ftpAt(ctx, net.JoinHostPort(host, "21"))
+}
 func ftpAt(ctx context.Context, addr string) *Finding {
 	d := net.Dialer{}
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -475,7 +485,9 @@ func ftpAt(ctx context.Context, addr string) *Finding {
 	return nil
 }
 
-func probeRDP(ctx context.Context, host string) *Finding { return rdpAt(ctx, net.JoinHostPort(host, "3389")) }
+func probeRDP(ctx context.Context, host string) *Finding {
+	return rdpAt(ctx, net.JoinHostPort(host, "3389"))
+}
 func rdpAt(ctx context.Context, addr string) *Finding {
 	// RDP: client sends an X.224 Connection Request; the server replies with a TPKT-framed
 	// Connection Confirm (starts 0x03 0x00 ...). Sending the CR and seeing that reply = RDP up.
