@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -74,8 +75,24 @@ func main() {
 		logging.LDD(logger, 10, "main", "CONFIG_FAIL", err.Error())
 		os.Exit(1)
 	}
-	// Re-apply configured log level for all subsequent output.
-	logger = logging.Setup(parseLevel(cfg.LogLevel), os.Stdout)
+	// Re-apply configured log level; tee into a rotating file sink (default logs/vmpulse.log,
+	// 10MB x 3 backups) so windowless deployments (windowsgui builds) keep a diagnostic trail.
+	// "-" disables the file (stdout-only, e.g. containers with their own log collector).
+	writers := []io.Writer{os.Stdout}
+	if cfg.LogFile != "-" {
+		logPath := cfg.LogFile
+		if logPath == "" {
+			logPath = "logs/vmpulse.log"
+		}
+		if rw, rerr := logging.NewRotatingWriter(logPath, 10*1024*1024, 3); rerr == nil {
+			writers = append(writers, rw)
+			defer func() { _ = rw.Close() }()
+			logging.LDD(logger, 8, "main", "LOG_FILE", logPath+" (10MB x3 rotation)")
+		} else {
+			logging.LDD(logger, 9, "main", "LOG_FILE_FAIL", rerr.Error())
+		}
+	}
+	logger = logging.Setup(parseLevel(cfg.LogLevel), writers...)
 
 	// Apply web-SSH hardening knobs (per-user session limit + idle reaper) before api.New wires the
 	// routes. Zero values keep the built-in defaults (3 sessions, 30 min idle).
@@ -203,7 +220,8 @@ func main() {
 	// proposed commands surface back in the chat as ✅/❌ buttons resolved through the shared
 	// approve-path. Runs until ctx is cancelled.
 	tgMgr := &tgchat.Manager{Store: s, Agent: agent, Approver: server, Logger: logger}
-	server.WithChatMirror(tgMgr) // web chat turns relay to telegram (no-op w/o agent_chat_enabled)
+	server.WithChatMirror(tgMgr)  // web chat turns relay to telegram (no-op w/o agent_chat_enabled)
+	server.WithShutdownFunc(stop) // Settings stop button -> same graceful path as Ctrl+C/SIGTERM
 	go tgMgr.Run(ctx)
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and

@@ -43,6 +43,7 @@ type Config struct {
 	Listen   string  `yaml:"listen"`    // address:port, e.g. "127.0.0.1:8443"
 	DBPath   string  `yaml:"db_path"`   // SQLite file path
 	LogLevel string  `yaml:"log_level"` // debug | info | warn
+	LogFile  string  `yaml:"log_file"`  // rotating file sink; "" = logs/vmpulse.log, "-" = stdout only
 	AI       AI      `yaml:"ai"`
 	Auth     Auth    `yaml:"auth"`
 	Vault    Vault   `yaml:"vault"`
@@ -129,6 +130,7 @@ func Default() *Config {
 		Listen:   "127.0.0.1:8443",
 		DBPath:   "data/vmpulse.sqlite",
 		LogLevel: "info",
+		LogFile:  "logs/vmpulse.log",
 	}
 }
 
