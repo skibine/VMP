@@ -146,9 +146,9 @@ func DomainMutatorTools(s *store.Store) []Tool {
 	return []Tool{
 		{
 			Name: "update_domain",
-			Description: "Edit a monitored domain's settings: monitor_dns/monitor_whois/monitor_tls " +
-				"(bool), cert_notify_days/owner_notify_days (reminder thresholds), dns_notify_enabled. " +
-				"Only provided fields change. Renames/deletion stay web-only.",
+			Description: "Edit a monitored domain: rename via name (fix a typo — checks follow " +
+				"the domain id), monitor_dns/monitor_whois/monitor_tls (bool), cert_notify_days/" +
+				"owner_notify_days (reminder thresholds), dns_notify_enabled. Only provided fields change.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -179,6 +179,13 @@ func DomainMutatorTools(s *store.Store) []Tool {
 				setBool("monitor_whois", &d.MonitorWhois)
 				setBool("monitor_tls", &d.MonitorTLS)
 				setBool("dns_notify_enabled", &d.DNSNotifyEnabled)
+				if v, ok := strArg(args, "name"); ok {
+					nn := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(v), "www."))
+					if nn != "" {
+						d.Name = nn
+						changed = append(changed, "name")
+					}
+				}
 				if v, ok := intArg(args, "cert_notify_days"); ok {
 					d.CertNotifyDays = int(v)
 					changed = append(changed, "cert_notify_days")
@@ -199,6 +206,39 @@ func DomainMutatorTools(s *store.Store) []Tool {
 				}
 				auditAppendAI(s, "ai_update_domain", "domain", strconv.FormatInt(d.ID, 10), true)
 				return jsonStr(map[string]any{"ok": true, "changed": changed, "domain": d.Name})
+			},
+		},
+		{
+			Name: "delete_domain",
+			Description: "Remove a domain from monitoring (its checks and reminders go with it). " +
+				"Prefer update_domain(name=...) for a typo fix — this is for domains that should not " +
+				"be monitored at all. REFUSES to run unless confirm='yes' — get an explicit approval " +
+				"from the operator in chat first, then re-call with confirm.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"domain_id": map[string]any{"type": "integer"},
+					"name":      map[string]any{"type": "string", "description": "domain name when id unknown"},
+					"confirm": map[string]any{"type": "string", "enum": []string{"yes"},
+						"description": "pass 'yes' ONLY after the operator explicitly approved the deletion"},
+				},
+				"required": []string{},
+			},
+			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				d, err := resolveDomain(ctx, args)
+				if err != nil {
+					return jsonStr(map[string]any{"error": err.Error()})
+				}
+				if c, _ := strArg(args, "confirm"); c != "yes" {
+					return jsonStr(map[string]any{"deleted": false,
+						"error":  "confirmation required: ask the operator, then re-call with confirm='yes'",
+						"domain": d.Name})
+				}
+				if err := s.DeleteDomain(ctx, d.ID); err != nil {
+					return jsonStr(map[string]any{"error": err.Error(), "domain_id": d.ID})
+				}
+				auditAppendAI(s, "ai_delete_domain", "domain", d.Name, true)
+				return jsonStr(map[string]any{"deleted": true, "domain_id": d.ID, "domain": d.Name})
 			},
 		},
 		{

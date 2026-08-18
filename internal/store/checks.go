@@ -14,6 +14,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -147,18 +148,39 @@ func (s *Store) DeleteCheck(ctx context.Context, id int64) error {
 var ErrSystemCheck = errors.New("system check cannot be modified")
 
 // EnsureSystemLiveness makes sure a VM has exactly one system liveness check (the composite
-// ping/ssh/web/tls probe that drives the fleet dot). Idempotent; re-creates if missing.
+// ping/ssh/web/tls probe that drives the fleet dot) probing the CURRENT ssh port. Idempotent;
+// re-creates if missing.
+// BUG_FIX_CONTEXT: previously any system check (incl. exposures) counted as "present" — a missing
+// liveness check was never re-created — and the port of an existing liveness check was never
+// updated, so after fixing a wrong port_ssh the probe kept hammering the old port forever (the
+// wrong-IP VMS incident). Now: filter by check_type='liveness' and rewrite params.port on change.
 func (s *Store) EnsureSystemLiveness(ctx context.Context, vmID int64, portSSH int) error {
-	var n int
-	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM checks WHERE vm_id=? AND system=1`, vmID).Scan(&n)
-	if n > 0 {
+	var id int64
+	var params string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id, params FROM checks WHERE vm_id=? AND system=1 AND check_type='liveness' LIMIT 1`, vmID).Scan(&id, &params)
+	if err == nil {
+		cur := 0
+		var p map[string]any
+		if json.Unmarshal([]byte(params), &p) == nil {
+			if f, ok := p["port"].(float64); ok {
+				cur = int(f)
+			}
+		}
+		if portSSH == 0 || cur == portSSH {
+			return nil
+		}
+		p["port"] = portSSH
+		if _, uerr := s.DB.ExecContext(ctx, `UPDATE checks SET params=? WHERE id=?`, marshalJSONcol(p), id); uerr != nil {
+			return fmt.Errorf("EnsureSystemLiveness: update port: %w", uerr)
+		}
 		return nil
 	}
 	port := portSSH
 	if port == 0 {
 		port = 22
 	}
-	_, err := s.CreateCheck(ctx, Check{
+	_, err = s.CreateCheck(ctx, Check{
 		VMID: &vmID, TargetType: "vm", CheckType: "liveness", Enabled: true, IntervalSec: 60,
 		System: true, Params: map[string]any{"port": port},
 	})

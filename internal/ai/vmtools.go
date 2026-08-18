@@ -396,6 +396,28 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 					vm.Kind = k
 					changed = append(changed, "kind")
 				}
+				// Connectivity fields (the wrong-IP/wrong-port fix path). At least one of ip/hostname
+				// must remain, and a changed port re-targets the system liveness probe.
+				if v, ok := strArg(args, "hostname"); ok {
+					vm.Hostname = strings.TrimSpace(v)
+					changed = append(changed, "hostname")
+				}
+				if v, ok := strArg(args, "ip"); ok {
+					vm.IP = strings.TrimSpace(v)
+					changed = append(changed, "ip")
+				}
+				portChanged := false
+				if pv, ok := intArg(args, "port_ssh"); ok {
+					if pv < 1 || pv > 65535 {
+						return jsonStr(map[string]any{"error": "port_ssh must be 1..65535"})
+					}
+					vm.PortSSH = int(pv)
+					changed = append(changed, "port_ssh")
+					portChanged = true
+				}
+				if strings.TrimSpace(vm.IP) == "" && strings.TrimSpace(vm.Hostname) == "" {
+					return jsonStr(map[string]any{"error": "vm needs at least one of ip / hostname"})
+				}
 				if len(changed) > 0 {
 					if err := s.UpdateVM(ctx, vm); err != nil {
 						var ve store.ValidationError
@@ -420,6 +442,13 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				}
 				if len(changed) == 0 {
 					return jsonStr(map[string]any{"ok": true, "changed": []string{}, "note": "nothing to change"})
+				}
+				if portChanged {
+					if err := s.EnsureSystemLiveness(ctx, vmID, vm.PortSSH); err != nil {
+						return jsonStr(map[string]any{"ok": true, "changed": changed,
+							"warning": "vm saved but the liveness probe re-target failed: " + err.Error()})
+					}
+					changed = append(changed, "liveness_port="+strconv.Itoa(vm.PortSSH))
 				}
 				auditAppendAI(s, "ai_update_vm", "vm", strconv.FormatInt(vmID, 10), true)
 				return jsonStr(map[string]any{"ok": true, "changed": changed})

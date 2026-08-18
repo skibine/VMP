@@ -91,6 +91,69 @@ func FleetMutators(s *store.Store) []Tool {
 			},
 		},
 		{
+			Name: "archive_vm",
+			Description: "Archive a VM/equipment: removes it from the fleet view and stops " +
+				"monitoring, but keeps ALL history; reversible from the web UI (archived tab). " +
+				"Prefer this over delete_vm whenever the operator may still need the data. " +
+				"Ask the operator in chat first.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"vm_id":  map[string]any{"type": "integer"},
+					"reason": map[string]any{"type": "string", "description": "short why (goes to the audit log)"},
+				},
+				"required": []string{"vm_id"},
+			},
+			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				vmID, _ := intArg(args, "vm_id")
+				vm, err := s.GetVM(ctx, vmID)
+				if err != nil {
+					return jsonStr(map[string]any{"error": "vm not found", "vm_id": vmID})
+				}
+				if err := s.ArchiveVM(ctx, vmID); err != nil {
+					return jsonStr(map[string]any{"error": err.Error(), "vm_id": vmID})
+				}
+				auditAppendAI(s, "ai_archive_vm", "vm", strconv.FormatInt(vmID, 10)+" name="+vm.Name, true)
+				return jsonStr(map[string]any{"archived": true, "vm_id": vmID, "name": vm.Name,
+					"note": "history kept; restore from the web UI archived tab"})
+			},
+		},
+		{
+			Name: "delete_vm",
+			Description: "PERMANENTLY delete a VM/equipment with ALL its history (checks, results, " +
+				"metrics). Irreversible. Use for wrongly-added hosts (e.g. a mistyped IP that was " +
+				"never real); use archive_vm when the data may matter later. The tool REFUSES to run " +
+				"unless confirm='yes' — get an explicit approval from the operator in chat first, " +
+				"then re-call with confirm.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"vm_id": map[string]any{"type": "integer"},
+					"confirm": map[string]any{"type": "string", "enum": []string{"yes"},
+						"description": "pass 'yes' ONLY after the operator explicitly approved the deletion"},
+					"reason": map[string]any{"type": "string", "description": "short why (goes to the audit log)"},
+				},
+				"required": []string{"vm_id"},
+			},
+			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				vmID, _ := intArg(args, "vm_id")
+				vm, err := s.GetVM(ctx, vmID)
+				if err != nil {
+					return jsonStr(map[string]any{"error": "vm not found", "vm_id": vmID})
+				}
+				if c, _ := strArg(args, "confirm"); c != "yes" {
+					return jsonStr(map[string]any{"deleted": false,
+						"error": "confirmation required: ask the operator, then re-call with confirm='yes'",
+						"vm_id": vmID, "name": vm.Name})
+				}
+				if err := s.DeleteVM(ctx, vmID); err != nil {
+					return jsonStr(map[string]any{"error": err.Error(), "vm_id": vmID})
+				}
+				auditAppendAI(s, "ai_delete_vm", "vm", strconv.FormatInt(vmID, 10)+" name="+vm.Name, true)
+				return jsonStr(map[string]any{"deleted": true, "vm_id": vmID, "name": vm.Name})
+			},
+		},
+		{
 			Name: "add_domain",
 			Description: "Add a domain (e.g. example.pro) to monitoring — registration (whois) and " +
 				"certificate (tls) expiry checks are provisioned immediately and reminders follow the " +

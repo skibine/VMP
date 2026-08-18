@@ -64,11 +64,16 @@ func (a *Agent) systemPrompt() string {
 		"Fleet config: checks and alert rules are full CRUD — list_checks / add_check / " +
 		"update_check / delete_check (system checks are refused), run_check_now for a live run, " +
 		"create_alert_rule / delete_alert_rule, ensure_liveness_rule as the covering shortcut. " +
-		"Domains: update_domain (toggles + notify thresholds), list/add/delete_domain_reminder, " +
+		"Domains: update_domain (toggles, notify thresholds, rename to fix a typo), " +
+		"delete_domain (confirm-gated), list/add/delete_domain_reminder, " +
 		"acknowledge_dns_change (only after the operator confirms the change is expected). " +
 		"Deleting easily-recreatable objects (checks, rules, reminders) is allowed — but ALWAYS " +
-		"confirm with the user in chat before a delete. VM metadata: update_vm (name/tags/notes/" +
-		"provider/location/cost + alert_muted / metrics_enabled folds).\n\n" +
+		"confirm with the user in chat before a delete. VM config: update_vm also fixes hostname/" +
+		"ip/port_ssh (wrong-address incidents; the liveness probe re-targets automatically) on top " +
+		"of metadata (name/tags/notes/provider/location/cost + alert_muted / metrics_enabled " +
+		"folds). archive_vm takes a VM off monitoring but keeps history; delete_vm wipes the VM and " +
+		"ALL its history and REFUSES without confirm='yes' — same confirm gate for delete_domain. " +
+		"Prefer fixing (update_vm) over deleting; prefer archive over delete.\n\n" +
 		"VM diagnostics: diagnose_vm (ad-hoc probe), scan_vm_ports (fast/full), scan_vm_exposures " +
 		"(security, persists), get_site_info, get_vm_metrics (stored series) — all credential-free. " +
 		"SSH-based reads (get_vm_snapshot, get_vm_errors, get_vm_updates, refresh_vm_inventory, " +
