@@ -91,8 +91,16 @@ func TestBuildBatterySpecs(t *testing.T) {
 	if !hasDNS {
 		t.Fatal("hostname VM must emit a dns spec")
 	}
-	if s2[0].Params["port"] != "2222" {
-		t.Errorf("ssh spec port must be 2222, got %v", s2[0].Params["port"])
+	// BUG_FIX_CONTEXT: ping is unconditionally specs[0]; locate the ssh spec by name
+	// instead of assuming index 0 (nil Params on ping made the old assertion fail always).
+	var sshPort any
+	for _, sp := range s2 {
+		if sp.Name == "ssh" {
+			sshPort = sp.Params["port"]
+		}
+	}
+	if sshPort != "2222" {
+		t.Errorf("ssh spec port must be 2222, got %v", sshPort)
 	}
 	t.Logf("[IMP:8][TestSpecs][RESULT] ip-only=%d specs, named=%d specs", len(s), len(s2))
 }
