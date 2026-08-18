@@ -47,4 +47,6 @@ coverage.out
 /.playwright-mcp/
 debug-*.png
 *.png
+# Product assets (logo/favicons) are committed despite the global png ban
+!web/public/*.png
 *.code-workspace

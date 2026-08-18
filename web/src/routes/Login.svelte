@@ -67,7 +67,10 @@
     class="hud-panel scan w-full max-w-sm p-8 space-y-5"
   >
     <div class="space-y-1">
-      <div class="hud-label">// VM PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
+      <div class="flex items-center gap-2">
+        <img src="/logo.png" alt="VM Pulse" class="h-8 w-8 shrink-0" />
+        <div class="hud-label">// VM PULSE{#if $appVersion}<span class="text-hud-dim/70 ml-2 text-[10px] normal-case">{$appVersion}</span>{/if}</div>
+      </div>
       <h1 class="text-2xl font-mono text-neon-green tracking-wide">{$t('login.title')}</h1>
       <p class="text-xs text-hud-dim">{twoFA ? $t('login.codePrompt') : $t('login.passPrompt')}</p>
     </div>
