@@ -130,6 +130,12 @@ func NewToken() (string, error) {
 func Middleware(s *store.Store, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Body size cap for authenticated API routes (1MB): no endpoint legitimately
+			// needs more (largest write is an AI/chat message); unbounded Decode is a
+			// memory-DoS surface otherwise.
+			if strings.HasPrefix(r.URL.Path, "/api/") && r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			}
 			if isPublic(r) {
 				next.ServeHTTP(w, r)
 				return

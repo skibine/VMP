@@ -42,16 +42,17 @@ var Version = "dev"
 // @purpose Bind an *http.Server to the store and expose its mux for testing (httptest).
 // endregion STRUCT_Server
 type Server struct {
-	store      *store.Store
-	logger     *slog.Logger
-	srv        *http.Server
-	mux        *http.ServeMux
-	agent      *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
-	pending2FA *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
-	chatMirror ChatMirror         // optional web->telegram chat relay
-	shutdownFn func()             // graceful-stop trigger (main wires it to the signal ctx cancel)
-	crud       *crudAPI           // owns the domain-health cache + warmer loop
-	Version    string             // build version stamp (injected via -ldflags main.Version), "dev" if unset
+	store        *store.Store
+	logger       *slog.Logger
+	srv          *http.Server
+	mux          *http.ServeMux
+	agent        *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
+	pending2FA   *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
+	loginLimiter *auth.Limiter      // brute-force damper: ip+username sliding window
+	chatMirror   ChatMirror         // optional web->telegram chat relay
+	shutdownFn   func()             // graceful-stop trigger (main wires it to the signal ctx cancel)
+	crud         *crudAPI           // owns the domain-health cache + warmer loop
+	Version      string             // build version stamp (injected via -ldflags main.Version), "dev" if unset
 }
 
 // WithAgent attaches an AI agent (enables POST /api/ai/chat).
@@ -85,7 +86,8 @@ func (s *Server) Use(mw func(http.Handler) http.Handler) {
 // endregion FUNC_New
 func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
-	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA(), Version: Version}
+	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA(),
+		loginLimiter: auth.NewLimiter(loginMaxAttempts, loginWindow), Version: Version}
 	mux.HandleFunc("/healthz", srv.healthHandler)
 	// Public build-version endpoint (no auth) so the login page + header can show the version stamp
 	// for build-mismatch debugging (sandbox vs operator PC).

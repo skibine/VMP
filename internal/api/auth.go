@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -32,8 +33,32 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
+// clientIP strips the port from RemoteAddr for rate-limit keys. X-Forwarded-For is
+// deliberately NOT honored: trusting it lets anyone behind no proxy (or a lying proxy)
+// rotate the limiter key and bypass the cap.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// Login brute-force window: 10 attempts per IP+username per 15 minutes. Successful login
+// clears the key, so an operator's typo streak never locks them out.
+const (
+	loginMaxAttempts = 10
+	loginWindow      = 15 * time.Minute
+)
+
+// dummyHash burns one argon2 verification when the username does not exist, so a missing-user
+// attempt costs the same CPU time as an existing one (timing-enumeration damper).
+var dummyHash, _ = auth.HashPassword("vmpulse-dummy-verify-target")
+
 // region FUNC_login [DOMAIN(9): API; CONCEPT(7): Login; TECH(7): net/http]
-// @purpose Verify credentials and issue a session token.
+// @purpose Verify credentials and issue a session token. Rate-limited per IP+username;
+//
+//	nonexistent users burn a dummy argon2 verify (anti-enumeration).
+//
 // @complexity 5
 // endregion FUNC_login
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +71,19 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Username = strings.TrimSpace(body.Username)
 
+	lkey := clientIP(r) + "|" + body.Username
+	if !s.loginLimiter.Allow(lkey) {
+		logging.LDD(s.logger, 9, "login", "RATE_LIMITED", "ip="+clientIP(r)+" username="+body.Username)
+		w.Header().Set("Retry-After", "300")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many attempts, try later"})
+		return
+	}
+
 	user, err := s.store.GetUserByUsername(r.Context(), body.Username)
+	if err != nil {
+		// Anti-enumeration: pay the same argon2 cost as for an existing user, then deny.
+		auth.VerifyPassword(body.Password, dummyHash)
+	}
 	if err != nil || !user.IsActive || !auth.VerifyPassword(body.Password, user.PasswordHash) {
 		_ = audit.Append(s.store.DB, s.logger, audit.Entry{
 			Plane: audit.PlaneB, Action: "auth.login", Detail: `{"username":"` + body.Username + `","ok":false}`,
@@ -67,6 +104,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"requires_2fa": true, "pending_token": pending})
 		return
 	}
+	s.loginLimiter.Clear(lkey)
 	token, err := auth.NewToken()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token"})
@@ -99,6 +137,14 @@ func (s *Server) loginTwoFA(w http.ResponseWriter, r *http.Request) {
 		Code         string `json:"code"`
 	}
 	if !readJSON(w, r, &body) {
+		return
+	}
+	// Same brute-force damper as step 1: a leaked pending token must not allow unlimited code
+	// guessing (10^6 codes, but skew gives ~3 live candidates at a time).
+	lkey := clientIP(r) + "|2fa|" + strings.TrimSpace(body.PendingToken)
+	if !s.loginLimiter.Allow(lkey) {
+		w.Header().Set("Retry-After", "300")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many attempts, try later"})
 		return
 	}
 	uid, ok := s.pending2FA.Consume(strings.TrimSpace(body.PendingToken))
