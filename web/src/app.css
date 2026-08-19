@@ -91,9 +91,17 @@ body {
      background-attachment: scroll keeps it glued to the section box (it does
      not scroll away with the content). Center-bottom: clear of both the
      sidebar and the chat column on any viewport. */
+  /* Light theme: the dark-theme watermark is light-stroked and washes out on the light
+     background (measured: ~1% contrasting pixels vs ~16% in dark). Swap to the black variant
+     (logo-wm_b.png, black strokes, alpha baked at 0.35 - same effective strength). */
+  .light .hud-wm {
+    --wm-img: url('/logo-wm_b.png');
+  }
+
   .hud-wm {
+    --wm-img: url('/logo-wm.png');
     background-image:
-      url('/logo-wm.png'),
+      var(--wm-img),
       linear-gradient(var(--grid-line) 1px, transparent 1px),
       linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
     background-size: min(440px, 42vw) auto, 28px 28px, 28px 28px;
