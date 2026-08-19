@@ -57,7 +57,11 @@ var securityHeaderKeys = []string{
 // endregion FUNC_ProbeSite
 func ProbeSite(ctx context.Context, url string) (SiteInfo, error) {
 	info := SiteInfo{URL: url, SecurityHeaders: map[string]string{}}
-	client := &http.Client{Timeout: 8 * time.Second}
+	if err := CheckTargetURL(url); err != nil { // SSRF guard (scheme + metadata names; dials re-checked)
+		info.FetchError = err.Error()
+		return info, err
+	}
+	client := SafeClient(8 * time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		info.FetchError = err.Error()
@@ -148,9 +152,10 @@ var cmsPathProbes = []struct {
 
 // probeCMSPaths sends light GET requests to distinctive CMS endpoints (in order) to confirm a CMS.
 func probeCMSPaths(ctx context.Context, base string, info *SiteInfo) {
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := SafeClient(5 * time.Second)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse // do not follow; we inspect the direct status
-	}}
+	}
 	for _, p := range cmsPathProbes {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+p.Path, nil)
 		if err != nil {

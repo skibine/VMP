@@ -33,7 +33,12 @@ func (HTTPChecker) Run(ctx context.Context, target string, params map[string]any
 	url := strOf(params, "url", "http://"+target+"/")
 	timeout := timeoutOf(params, 5*time.Second)
 	expect := intOf(params, "expect_status", 0)
-	client := &http.Client{Timeout: timeout}
+	// SSRF guard: refuse non-http schemes + metadata hosts up front; every dial (incl.
+	// redirect hops, which re-dial through the same transport) is metadata-checked.
+	if err := CheckTargetURL(url); err != nil {
+		return Result{Status: StatusCritical, Message: err.Error(), Detail: map[string]any{"url": url}}
+	}
+	client := SafeClient(timeout)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

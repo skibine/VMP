@@ -25,6 +25,7 @@ import (
 
 	"github.com/skibine/vm-pulse/internal/alerts"
 	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vm-pulse/internal/monitor"
 	"github.com/skibine/vm-pulse/internal/store"
 )
 
@@ -633,6 +634,18 @@ func validateChannelConfig(chType string, config map[string]any) string {
 		}
 		if isPrivateOrLoopbackHost(u.Hostname()) {
 			return "webhook url must not target a loopback/private/cloud-metadata address"
+		}
+		// BUG_FIX_CONTEXT: the literal check above is blind to hostnames that RESOLVE to
+		// private/metadata ranges (10.0.0.1.nip.io, DNS rebinding) - resolve and verify.
+		if monitor.HostBlocked(u.Hostname()) {
+			return "webhook url resolves to a blocked (private/metadata) address"
+		}
+		if ips, err := net.LookupIP(u.Hostname()); err == nil {
+			for _, ip := range ips {
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+					return "webhook url resolves to a loopback/private address"
+				}
+			}
 		}
 	}
 	return ""
