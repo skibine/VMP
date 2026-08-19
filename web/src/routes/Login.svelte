@@ -4,7 +4,7 @@
   import { onMount } from 'svelte'
   import { tick } from 'svelte'
   onMount(() => { api.version().then((v) => { if (v && v.version) appVersion.set(v.version) }).catch(() => {}) })
-  import { t } from '../lib/i18n.js'
+  import { t, locale } from '../lib/i18n.js'
 
   let username = ''
   let password = ''
@@ -79,7 +79,23 @@
       docBusy = false
     }
   }
-  function sevColor(s) {
+  // Backend findings carry stable IDs; localized title/recommendation live here (ru).
+  // Technical details (uid=0, PermitRootLogin=yes…) stay as-is - machine facts, not prose.
+  const DOC_SEV_RU = { critical: 'КРИТИЧНО', warn: 'ВНИМАНИЕ', minor: 'МЕЛОЧЬ', ok: 'ОК' }
+  const DOC_RU = {
+    svc_as_root: ['процесс запущен от рута', 'создайте непривилегированного пользователя (например, vmpulse) и запускайте сервис от него.'],
+    exposed_unauth: ['открытые сервисы без авторизации', 'закройте порт или включите авторизацию; БД и docker API никогда не должны смотреть в интернет.'],
+    no_firewall_public: ['не найден файрвол хоста', 'включите файрвол (ufw) и разрешите только нужные VM Pulse порты.'],
+    firewall_unreadable: ['состояние файрвола нечитаемо', 'перезапустите от администратора (sudo vmpulse doctor), чтобы прочитать состояние файрвола.'],
+    ssh_password_public: ['SSH принимает пароли', 'перейдите на ключи и выставьте PasswordAuthentication no.'],
+    ssh_root_login: ['SSH пускает root', 'выставьте PermitRootLogin no и заходите обычным пользователем с sudo.'],
+    datacenter_bind_wildcard: ['привязка на 0.0.0.0 в датацентре', 'приложение будет напрямую открыто в интернет; используйте reverse-proxy с TLS и доступом по ключам.'],
+    low_disk: ['мало места на диске', 'освободите место: логи, кэши, старые бэкапы.'],
+  }
+  function docSev(s) { return $locale === 'ru' ? DOC_SEV_RU[s] || s : (s || '—') }
+  function docTitle(f) { return ($locale === 'ru' && DOC_RU[f.id]?.[0]) || f.title }
+  function docRec(f) { return ($locale === 'ru' && DOC_RU[f.id]?.[1]) || f.recommendation }
+  function docSevColor(s) {
     return s === 'critical' ? 'text-neon-red border-neon-red/40' : s === 'warn' ? 'text-neon-amber border-neon-amber/40' : 'text-neon-green border-neon-green/40'
   }
 </script>
@@ -133,10 +149,13 @@
     {#if twoFA}
       <button type="button" class="hud-btn w-full" on:click={backToPassword}>{$t('login.back')}</button>
     {/if}
-  </form>
-    <div class="mt-4 flex items-center justify-center gap-2">
+
+    <div class="pt-1 border-t border-hud-line flex items-center justify-between">
       <button type="button" class="text-[11px] font-mono text-hud-dim hover:text-neon-cyan underline" on:click={runDoctor}>{$t('login.doctor')}</button>
+      <span class="text-[9px] font-mono text-hud-dim/60">read-only</span>
     </div>
+  </form>
+
 
   {#if docOpen}
     <div class="fixed inset-0 z-[90] bg-black/70 flex items-center justify-center p-4" on:click={() => (docOpen = false)} on:contextmenu|preventDefault={() => (docOpen = false)}>
@@ -149,20 +168,20 @@
           <div class="text-[11px] text-hud-dim">{$t('login.doctorFail')}</div>
         {:else if doc}
           <div class="flex items-center gap-3">
-            <span class="text-xs font-mono px-2 py-1 rounded border {sevColor(doc.verdict?.severity)} uppercase">{doc.verdict?.severity ?? '—'}</span>
-            <span class="text-xs font-mono text-hud-dim">risk score: {doc.verdict?.score ?? '?'}/100</span>
+            <span class="text-xs font-mono px-2 py-1 rounded border {docSevColor(doc.verdict?.severity)} uppercase">{docSev(doc.verdict?.severity) ?? '—'}</span>
+            <span class="text-xs font-mono text-hud-dim">{$t('login.docScore')}: {doc.verdict?.score ?? '?'}/100</span>
             <span class="ml-auto text-[10px] font-mono text-hud-dim">{doc.context?.distro || doc.platform}</span>
           </div>
           {#if doc.verdict?.findings?.length}
             <div class="space-y-1.5">
               {#each doc.verdict.findings as f (f.id)}
-                <div class="border rounded p-2 space-y-0.5 {sevColor(f.severity).includes('neon-red') ? 'border-neon-red/30' : sevColor(f.severity).includes('neon-amber') ? 'border-neon-amber/30' : 'border-neon-green/30'}">
+                <div class="border rounded p-2 space-y-0.5 {docSevColor(f.severity).includes('neon-red') ? 'border-neon-red/30' : docSevColor(f.severity).includes('neon-amber') ? 'border-neon-amber/30' : 'border-neon-green/30'}">
                   <div class="flex items-center gap-2">
-                    <span class="text-[9px] font-mono px-1 rounded border {sevColor(f.severity)} uppercase">{f.severity}</span>
-                    <span class="text-xs font-mono text-emerald-100">{f.title}</span>
+                    <span class="text-[9px] font-mono px-1 rounded border {docSevColor(f.severity)} uppercase">{docSev(f.severity)}</span>
+                    <span class="text-xs font-mono text-emerald-100">{docTitle(f)}</span>
                   </div>
                   {#if f.detail}<div class="text-[11px] text-hud-dim leading-snug">{f.detail}</div>{/if}
-                  {#if f.recommendation}<div class="text-[11px] text-neon-cyan/80 leading-snug">→ {f.recommendation}</div>{/if}
+                  {#if f.recommendation}<div class="text-[11px] text-neon-cyan/80 leading-snug">→ {docRec(f)}</div>{/if}
                 </div>
               {/each}
             </div>
