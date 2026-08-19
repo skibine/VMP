@@ -158,8 +158,15 @@ func (s *Server) loginTwoFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.TrimSpace(body.Code)
-	// Try a TOTP code first; fall back to a one-time backup code.
-	if !auth.Validate(user.TOTPSecret, code, time.Now()) {
+	// TOTP with REPLAY PROTECTION: the matched counter step must be strictly greater than the
+	// last consumed one - a captured code is useless within its ~60-90s validity window.
+	// (Backup codes remain one-time by consumption, no step semantics.)
+	step, valid := auth.ValidateStep(user.TOTPSecret, code, time.Now())
+	if valid && step <= user.TOTPLastStep {
+		valid = false // replay of the already-consumed step
+		logging.LDD(s.logger, 9, "loginTwoFA", "REPLAY_REFUSED", "step replayed")
+	}
+	if !valid {
 		if !s.tryBackupCode(r.Context(), user, code) {
 			_ = audit.Append(s.store.DB, s.logger, audit.Entry{
 				Plane: audit.PlaneB, UserID: user.ID, Action: "auth.login_2fa", Success: false,
@@ -168,6 +175,9 @@ func (s *Server) loginTwoFA(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid code"})
 			return
 		}
+	} else {
+		// Persist the consumed TOTP step (replay guard for the ~60-90s validity window).
+		_ = s.store.SetTOTPLastStep(r.Context(), user.ID, step)
 	}
 	token, err := auth.NewToken()
 	if err != nil {

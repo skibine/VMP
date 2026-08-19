@@ -61,6 +61,24 @@ func hotp(secret string, counter uint64) (string, error) {
 	return fmt.Sprintf("%0*d", totpDigits, bin%uint32(pow10(totpDigits))), nil
 }
 
+// ValidateStep checks a TOTP code and returns the matched counter step (for replay guards:
+// callers persist it and refuse any future match with a step <= the stored one).
+func ValidateStep(secret, code string, now time.Time) (int64, bool) {
+	if len(code) != totpDigits {
+		return 0, false
+	}
+	counter := int64(now.Unix()) / int64(totpStep.Seconds())
+	for i := -totpSkew; i <= totpSkew; i++ {
+		step := counter + int64(i)
+		if c, err := hotp(secret, uint64(step)); err == nil {
+			if subtle.ConstantTimeCompare([]byte(c), []byte(code)) == 1 {
+				return step, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // Validate checks a TOTP code against the secret at `now`, allowing ±totpSkew steps of skew.
 func Validate(secret, code string, now time.Time) bool {
 	if len(code) != totpDigits {

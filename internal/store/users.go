@@ -33,6 +33,7 @@ type User struct {
 	IsActive     bool   `json:"is_active"`
 	TOTPEnabled  bool   `json:"totp_enabled"`
 	TOTPSecret   string `json:"-"` // vault-encrypted at rest; plaintext only in RAM
+	TOTPLastStep int64  `json:"-"` // replay guard: highest TOTP counter step already consumed
 	BackupCodes  string `json:"-"` // JSON array of argon2id hashes
 	CreatedAt    string `json:"created_at"`
 	LastLoginAt  string `json:"last_login_at"`
@@ -59,14 +60,16 @@ INSERT INTO users (username, password_hash, password_algo, role) VALUES (?,?,?,?
 // GetUserByUsername returns the user for login lookups.
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active,
- totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,'')
+ totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,''),
+ COALESCE(totp_last_step,0)
  FROM users WHERE username = ?`, username)
 }
 
 // GetUser returns a user by id.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
 	return s.scanUser(ctx, `SELECT id, username, password_hash, password_algo, role, is_active,
- totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,'')
+ totp_enabled, totp_secret, backup_codes, created_at, COALESCE(last_login_at,''),
+ COALESCE(totp_last_step,0)
  FROM users WHERE id = ?`, id)
 }
 
@@ -103,7 +106,7 @@ func (s *Store) scanUser(ctx context.Context, q string, args ...any) (User, erro
 	var rawSecret, backups string
 	err := s.DB.QueryRowContext(ctx, q, args...).Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.PasswordAlgo, &u.Role, &active,
-		&totpEnabled, &rawSecret, &backups, &u.CreatedAt, &u.LastLoginAt)
+		&totpEnabled, &rawSecret, &backups, &u.CreatedAt, &u.LastLoginAt, &u.TOTPLastStep)
 	if err == sql.ErrNoRows {
 		return User{}, ErrNotFound
 	}
@@ -115,6 +118,18 @@ func (s *Store) scanUser(ctx context.Context, q string, args ...any) (User, erro
 	u.TOTPSecret = s.decCol(rawSecret) // plaintext in RAM only
 	u.BackupCodes = backups
 	return u, nil
+}
+
+// region FUNC_SetTOTPLastStep [DOMAIN(9): Security; CONCEPT(7): ReplayGuard; TECH(5): SQLite]
+// @purpose Persist the consumed TOTP step so the same (or older) code cannot be replayed.
+// @complexity 2
+// endregion FUNC_SetTOTPLastStep
+func (s *Store) SetTOTPLastStep(ctx context.Context, userID, step int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_last_step=? WHERE id=?`, step, userID)
+	if err != nil {
+		return fmt.Errorf("SetTOTPLastStep: %w", err)
+	}
+	return nil
 }
 
 // EnableTOTP stores the (vault-encrypted) TOTP seed + backup-code hashes and flips the flag on.
