@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/auth"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/auth"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // WithShutdownFunc attaches the graceful-stop trigger (main wires it to the signal context

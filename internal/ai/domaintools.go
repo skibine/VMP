@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/monitor"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/monitor"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // DomainTools builds the domain tools: reads (list_domains stored + get_domain_info live probe)

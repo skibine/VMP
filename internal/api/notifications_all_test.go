@@ -16,7 +16,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 func TestHTTP_NotificationsAllAndClear(t *testing.T) {

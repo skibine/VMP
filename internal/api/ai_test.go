@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/ai"
+	"github.com/skibine/vmp/internal/ai"
 )
 
 // stubProvider always returns a fixed answer.

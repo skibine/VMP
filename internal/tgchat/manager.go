@@ -29,9 +29,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // loop is one running poller entry (kept in Manager.current while active).

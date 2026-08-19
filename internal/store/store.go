@@ -36,8 +36,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/crypto"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/crypto"
+	"github.com/skibine/vmp/internal/logging"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registration
 )
 

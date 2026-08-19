@@ -18,8 +18,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/crypto"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/crypto"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // GetMeta reads a value from config_meta; ok=false when the key is absent.

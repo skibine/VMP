@@ -19,7 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 var validReminderKinds = map[string]bool{"cert": true, "owner": true, "dns": true}

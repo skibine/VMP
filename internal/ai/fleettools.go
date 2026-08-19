@@ -33,8 +33,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // FleetMutators builds the immediate-mutation tools: add_vm and add_domain.

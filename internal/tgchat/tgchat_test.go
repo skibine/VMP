@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/ai"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/ai"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // fakeBot is an httptest Bot API: it records every sendMessage/edit/answer call and can hand

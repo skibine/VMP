@@ -1,4 +1,4 @@
-module github.com/skibine/vm-pulse
+module github.com/skibine/vmp
 
 go 1.26.6
 

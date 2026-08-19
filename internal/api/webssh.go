@@ -26,11 +26,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/auth"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/ssh"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/auth"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/ssh"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // web-SSH hardening knobs (the terminal is full fleet access, so it is the most dangerous surface).

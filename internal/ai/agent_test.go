@@ -16,9 +16,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/lddcheck"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/lddcheck"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // scriptProvider returns scripted responses in order.

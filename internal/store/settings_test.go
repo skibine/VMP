@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/crypto"
+	"github.com/skibine/vmp/internal/crypto"
 )
 
 func armVault(t *testing.T, s *Store) {

@@ -7,7 +7,7 @@
 //	will wrap these with Plane B session middleware.
 //
 // @io RegisterCRUD(mux, store, logger) wires all routes.
-// @uses net/http, encoding/json, github.com/skibine/vm-pulse/internal/store
+// @uses net/http, encoding/json, github.com/skibine/vmp/internal/store
 // @invariants
 //   - Validation errors -> 400, not found -> 404, duplicate -> 409, else -> 500.
 //   - JSON only; Content-Type application/json on responses.
@@ -26,9 +26,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/ssh"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/ssh"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // crudAPI holds dependencies for CRUD handlers.

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_test_UntrustedTurn [DOMAIN(9): Security; CONCEPT(8): AutoApproveGate; TECH(6): Registry]

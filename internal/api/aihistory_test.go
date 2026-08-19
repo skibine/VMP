@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/ai"
+	"github.com/skibine/vmp/internal/ai"
 )
 
 // echoHistoryProvider echoes back the last user message it SAW in history (proves context flow).

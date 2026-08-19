@@ -15,8 +15,8 @@ import (
 	"testing"
 
 	"bytes"
-	"github.com/skibine/vm-pulse/internal/lddcheck"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/lddcheck"
+	"github.com/skibine/vmp/internal/logging"
 	"log/slog"
 )
 

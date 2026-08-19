@@ -26,7 +26,7 @@ import (
 	"github.com/coder/websocket"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // wsBinaryWriter forwards remote SSH output to the browser as binary WebSocket frames.

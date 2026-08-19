@@ -29,8 +29,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // auditEvent is one row for the viewer (user-friendly field set). VMID is EXTRACTED from the

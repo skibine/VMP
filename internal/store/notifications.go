@@ -19,7 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region FUNC_CreateNotification [DOMAIN(7): Alerting; CONCEPT(6): Create; TECH(6): database/sql]

@@ -14,7 +14,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // TestAIModels_ProxyList stores a provider config pointing at a fake upstream and expects the

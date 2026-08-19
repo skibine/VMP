@@ -19,7 +19,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // ErrNotConfigured is returned when AI settings are incomplete.

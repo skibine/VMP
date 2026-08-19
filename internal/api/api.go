@@ -7,7 +7,7 @@
 //	and Plane B management both ride this server but enforce their own gating.
 //
 // @io (store *store.Store, addr string, logger) -> *Server
-// @uses net/http, encoding/json, context, github.com/skibine/vm-pulse/internal/store
+// @uses net/http, encoding/json, context, github.com/skibine/vmp/internal/store
 // @invariants
 //   - New NEVER returns a nil mux.
 //   - /healthz never requires authentication (it reports liveness only, no secrets).
@@ -25,10 +25,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/ai"
-	"github.com/skibine/vm-pulse/internal/auth"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/ai"
+	"github.com/skibine/vmp/internal/auth"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // shutdownTimeout bounds graceful shutdown.

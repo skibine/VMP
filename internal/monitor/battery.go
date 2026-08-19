@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // ProbeSpec is one probe in the battery: a friendly name + checker invocation.

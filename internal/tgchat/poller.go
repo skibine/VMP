@@ -35,10 +35,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/ai"
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/ai"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // Asker is the agent face the bridge needs (implemented by *ai.Agent).

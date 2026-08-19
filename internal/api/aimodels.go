@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // aiModelsHTTP is the client used for upstream /models calls; package-level so tests can shrink

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region FUNC_Backup [DOMAIN(8): Storage; CONCEPT(7): Snapshot; TECH(8): SQLite,VACUUM INTO]

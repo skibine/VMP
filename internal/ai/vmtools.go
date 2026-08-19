@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/monitor"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/monitor"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // VMDataReader exposes the dialer-backed SSH reads (implemented in main.go over the ssh dialer).

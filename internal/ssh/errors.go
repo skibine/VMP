@@ -27,7 +27,7 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // ErrorEntry is one parsed error log line.

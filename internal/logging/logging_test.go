@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/lddcheck"
+	"github.com/skibine/vmp/internal/lddcheck"
 )
 
 // printIMP prints LDD lines with IMP>=7 to the test console (Semantic Trace Verification).

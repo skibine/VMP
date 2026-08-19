@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_registerNotifications [DOMAIN(7): Alerting; CONCEPT(6): Routing; TECH(5): net/http]

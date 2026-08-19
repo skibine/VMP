@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // AlertTools builds the alerting read/config tools.

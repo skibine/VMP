@@ -7,7 +7,7 @@
 //	the security posture (see foundation-v2 §2, §9).
 //
 // @io (path string, logger *slog.Logger) -> (*Config, error)
-// @uses gopkg.in/yaml.v3, os, github.com/skibine/vm-pulse/internal/logging
+// @uses gopkg.in/yaml.v3, os, github.com/skibine/vmp/internal/logging
 // @invariants
 //   - Load NEVER returns a Config with an empty Mode; missing mode defaults to "local".
 //   - Local mode is the fail-secure default (less attack surface).
@@ -24,7 +24,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 	"gopkg.in/yaml.v3"
 )
 

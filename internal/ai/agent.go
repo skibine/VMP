@@ -22,7 +22,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region STRUCT_Agent [DOMAIN(9): AI; CONCEPT(7): Orchestrator; TECH(6): struct]

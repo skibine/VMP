@@ -23,10 +23,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/alerts"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/monitor"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/alerts"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/monitor"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // registerAlerts wires all alerting routes onto the mux.

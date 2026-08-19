@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/ai"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/ai"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_aiChat [DOMAIN(8): AI; CONCEPT(7): Handler; TECH(7): net/http]

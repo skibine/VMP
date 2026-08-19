@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/health"
-	"github.com/skibine/vm-pulse/internal/monitor"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/health"
+	"github.com/skibine/vmp/internal/monitor"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region STRUCT_Registry [DOMAIN(8): AI; CONCEPT(7): ToolRegistry; TECH(6): map]

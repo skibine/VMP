@@ -16,7 +16,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/auth"
+	"github.com/skibine/vmp/internal/auth"
 )
 
 // doH drives a specific handler (the middleware-wrapped one) with an optional bearer token.

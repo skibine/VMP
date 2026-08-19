@@ -17,7 +17,7 @@ package install
 import (
 	"sort"
 
-	"github.com/skibine/vm-pulse/internal/monitor"
+	"github.com/skibine/vmp/internal/monitor"
 )
 
 // Verdict is the audit's bottom line.

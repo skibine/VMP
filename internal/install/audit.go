@@ -25,8 +25,8 @@ import (
 
 	"log/slog"
 
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/monitor"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/monitor"
 )
 
 // Privilege is the effective identity + capability of the running process.

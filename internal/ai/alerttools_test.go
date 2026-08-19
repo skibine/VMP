@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 func TestListChannels_NoSecrets(t *testing.T) {

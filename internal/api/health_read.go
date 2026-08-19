@@ -15,9 +15,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/skibine/vm-pulse/internal/health"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/health"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_vmResults [DOMAIN(7): API; CONCEPT(6): Read; TECH(6): net/http]

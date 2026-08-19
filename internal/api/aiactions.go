@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // registerAIActions wires the action approval endpoints onto a crudAPI (which carries the dialer).

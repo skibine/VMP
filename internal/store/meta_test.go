@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/crypto"
+	"github.com/skibine/vmp/internal/crypto"
 )
 
 func TestMeta_GetSetUpsert(t *testing.T) {

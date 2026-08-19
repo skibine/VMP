@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region FUNC_CreateCheck [DOMAIN(8): Storage; CONCEPT(7): Create; TECH(7): database/sql]

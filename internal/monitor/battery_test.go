@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_test_Battery [DOMAIN(7): Testing; CONCEPT(8): Telemetry; TECH(7): net,parallel]

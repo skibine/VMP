@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/lddcheck"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/lddcheck"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // TestBackup_RoundTrip writes a VM, snapshots it, re-opens the snapshot and confirms the VM

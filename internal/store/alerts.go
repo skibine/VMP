@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region STRUCT_AlertRule [DOMAIN(8): Alerting; CONCEPT(7): Rule; TECH(6): struct]

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // metricTS formats a time exactly like the metric_samples.ts column DEFAULT

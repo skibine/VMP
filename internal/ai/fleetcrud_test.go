@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_test_FleetCRUD_VM [DOMAIN(7): Testing; CONCEPT(8): WrongAddressFix; TECH(6): Registry]

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region FUNC_test_ManagerMirror [DOMAIN(7): Testing; CONCEPT(8): MirrorFanout; TECH(7): httptest]

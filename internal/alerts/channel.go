@@ -20,7 +20,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region STRUCT_Message [DOMAIN(7): Alerting; CONCEPT(7): Payload; TECH(5): struct]

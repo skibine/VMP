@@ -34,7 +34,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // Plane constants. Plane A = always-on monitoring/service events (no master passphrase).

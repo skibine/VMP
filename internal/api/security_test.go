@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/auth"
+	"github.com/skibine/vmp/internal/auth"
 )
 
 // region FUNC_test_SecurityHeaders [DOMAIN(8): Security; CONCEPT(7): Headers; TECH(5]: httptest]

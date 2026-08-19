@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // region STRUCT_Options [DOMAIN(7): Monitoring; CONCEPT(6): Config; TECH(5): struct]

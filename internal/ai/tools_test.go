@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"bytes"
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 	"log/slog"
 )
 

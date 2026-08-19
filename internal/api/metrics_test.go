@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 func TestMetricsAPI_ToggleAndSeries(t *testing.T) {

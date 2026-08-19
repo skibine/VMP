@@ -25,8 +25,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/monitor"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/monitor"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // CheckTools builds the checks & alert-rules tool set.

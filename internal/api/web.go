@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/web"
+	"github.com/skibine/vmp/internal/web"
 )
 
 // registerSPA mounts the embedded frontend at "/" (catch-all).

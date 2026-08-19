@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/auth"
+	"github.com/skibine/vmp/internal/auth"
 )
 
 func TestHTTP_SettingsAI_MaskedAndPreserve(t *testing.T) {

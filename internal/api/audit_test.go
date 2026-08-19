@@ -17,8 +17,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/audit"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/audit"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // seedAudit writes a deterministic event set (mix of categories/planes/vms).

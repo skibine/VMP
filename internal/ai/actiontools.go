@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // ActionExecutor runs an approved command on a VM (wired by the api layer to the SSH dialer).

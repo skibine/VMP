@@ -30,8 +30,8 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // Sentinel errors. Wrap with %w so callers can errors.Is.

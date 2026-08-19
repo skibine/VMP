@@ -6,7 +6,7 @@ Any agent working in this repo MUST respect the conventions below.
 ## Project facts
 
 - **Language:** Go 1.26+ (backend), Svelte (frontend, later), SQLite (storage).
-- **Module path:** `github.com/skibine/vm-pulse`.
+- **Module path:** `github.com/skibine/vmp`.
 - **SQLite driver:** `modernc.org/sqlite` (pure Go, no CGO) — chosen so GoReleaser
   cross-compiles cleanly (Win/Linux/macOS × x64/arm64). Do NOT switch to CGO drivers
   without revisiting the cross-compile pipeline.
@@ -59,7 +59,7 @@ package store
 ### LDD helper usage
 
 ```go
-import "github.com/skibine/vm-pulse/internal/logging"
+import "github.com/skibine/vmp/internal/logging"
 logging.LDD(logger, 9, "Open", "MIGRATED", "applied N migrations")
 // emits: level=<warn> msg="[IMP:9][Open][MIGRATED] applied N migrations" imp=9
 ```

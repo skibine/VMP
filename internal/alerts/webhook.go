@@ -24,7 +24,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/skibine/vm-pulse/internal/monitor"
+	"github.com/skibine/vmp/internal/monitor"
 	"io"
 	"net/http"
 	"net/url"

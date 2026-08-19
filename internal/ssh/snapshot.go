@@ -23,7 +23,7 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // snapshotCMD is the single, fixed command run on the VM. Section markers make parsing robust.

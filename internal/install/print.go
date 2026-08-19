@@ -18,7 +18,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/skibine/vm-pulse/internal/monitor"
+	"github.com/skibine/vmp/internal/monitor"
 )
 
 // severityColor maps a severity to an ANSI color code.

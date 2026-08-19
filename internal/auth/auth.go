@@ -28,8 +28,8 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/skibine/vm-pulse/internal/logging"
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/logging"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // argon2id parameters (tuneable; sane defaults).

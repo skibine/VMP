@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/lddcheck"
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/lddcheck"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 func testLogger(t *testing.T) (*slog.Logger, *bytes.Buffer) {

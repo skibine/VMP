@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // ErrDuplicate is returned when a UNIQUE constraint is violated (e.g. domain name).

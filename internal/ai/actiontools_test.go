@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/skibine/vm-pulse/internal/store"
+	"github.com/skibine/vmp/internal/store"
 )
 
 // stubExec is a fake ActionExecutor for testing propose_command without SSH.

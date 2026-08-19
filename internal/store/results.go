@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/skibine/vm-pulse/internal/logging"
+	"github.com/skibine/vmp/internal/logging"
 )
 
 // region STRUCT_CheckResult [DOMAIN(8): Metrics; CONCEPT(7): Record; TECH(7): struct]
