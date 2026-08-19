@@ -258,6 +258,9 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required":   []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: a compromised VM can plant payloads in its own logs/packages
+				// (audit round 2) - content read over SSH marks the turn like any web fetch.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				return sshRead(ctx, vmID, func() (any, error) { return reader.Snapshot(ctx, vmID) })
 			},
@@ -275,6 +278,9 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required": []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: a compromised VM can plant payloads in its own logs/packages
+				// (audit round 2) - content read over SSH marks the turn like any web fetch.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				window, _ := strArg(args, "range")
 				if window == "" {
@@ -293,6 +299,9 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required":   []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: a compromised VM can plant payloads in its own logs/packages
+				// (audit round 2) - content read over SSH marks the turn like any web fetch.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				return sshRead(ctx, vmID, func() (any, error) { return reader.Updates(ctx, vmID) })
 			},
@@ -307,6 +316,9 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required":   []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: a compromised VM can plant payloads in its own logs/packages
+				// (audit round 2) - content read over SSH marks the turn like any web fetch.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				return sshRead(ctx, vmID, func() (any, error) { return reader.InventoryRefresh(ctx, vmID) })
 			},
@@ -321,6 +333,9 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required":   []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: a compromised VM can plant payloads in its own logs/packages
+				// (audit round 2) - content read over SSH marks the turn like any web fetch.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				return sshRead(ctx, vmID, func() (any, error) { return reader.VHosts(ctx, vmID) })
 			},

@@ -34,9 +34,12 @@ func securityHeaders(next http.Handler) http.Handler {
 		// frame-ancestors duplicates X-Frame-Options for modern browsers; style-src needs
 		// 'unsafe-inline' for Svelte's injected component styles; connect allows the SPA's
 		// fetch + websocket calls to self only.
+		// BUG_FIX_CONTEXT (audit round 2): connect-src used to list ws: wss: http: https: which
+		// is scheme-any-host - no restriction at all. The SPA is same-origin; ws/wss schemes
+		// still need naming (browsers do not fold them into 'self').
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "+
-				"script-src 'self'; connect-src 'self' ws: wss: http: https:; frame-ancestors 'none'; base-uri 'none'")
+				"script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			h.Set("Cache-Control", "no-store")
 		}

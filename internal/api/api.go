@@ -49,6 +49,7 @@ type Server struct {
 	agent        *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA   *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
 	loginLimiter *auth.Limiter      // brute-force damper: ip+username sliding window
+	ipLimiter    *auth.Limiter      // argon2-DoS damper: per-IP cap across ALL usernames
 	deployMode   string             // config mode ("local"|"server") - drives the UI security banner
 	chatMirror   ChatMirror         // optional web->telegram chat relay
 	shutdownFn   func()             // graceful-stop trigger (main wires it to the signal ctx cancel)
@@ -89,7 +90,8 @@ func (s *Server) Use(mw func(http.Handler) http.Handler) {
 func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA(),
-		loginLimiter: auth.NewLimiter(loginMaxAttempts, loginWindow), Version: Version}
+		loginLimiter: auth.NewLimiter(loginMaxAttempts, loginWindow),
+		ipLimiter:    auth.NewLimiter(loginIPMaxAttempts, loginWindow), Version: Version}
 	mux.HandleFunc("/healthz", srv.healthHandler)
 	mux.HandleFunc("GET /api/security/status", srv.securityStatus) // auth-gated (not in public list)
 	// Public build-version endpoint (no auth) so the login page + header can show the version stamp
@@ -136,14 +138,17 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 		status = "degraded"
 	}
 	logging.LDD(s.logger, 7, "healthHandler", "PROBE", status)
+	// BUG_FIX_CONTEXT (audit round 2): WriteHeader came AFTER Encode - Go implicitly sends
+	// 200 once the first body byte is written, so the 503 never reached clients (load
+	// balancers kept routing to a degraded instance).
+	if !dbOK {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":         status,
 		"db":             dbOK,
 		"schema_version": ver,
 	})
-	if !dbOK {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}
 }
 
 // versionHandler returns the build version stamp. Public (no auth) so the SPA/login page can show it

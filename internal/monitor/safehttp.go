@@ -45,8 +45,15 @@ var metadataHostnames = map[string]bool{
 	"metadata.google.internal": true,
 }
 
+// alibabaMetadata is the Alibaba Cloud metadata endpoint (100.100.100.200) - inside the
+// CGNAT range 100.64/10, so the link-local checks do not cover it (audit round 2).
+var alibabaMetadata = net.ParseIP("100.100.100.200")
+
 // isMetadataIP reports whether the address belongs to a cloud-metadata range.
 func isMetadataIP(ip net.IP) bool {
+	if ip.Equal(alibabaMetadata) {
+		return true
+	}
 	if ip.To4() != nil {
 		// 169.254.0.0/16 link-local: home of 169.254.169.254 (AWS/GCP/Azure/OpenStack metadata).
 		return ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()

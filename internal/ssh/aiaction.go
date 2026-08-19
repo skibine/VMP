@@ -130,6 +130,19 @@ var destructivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\broot\b.*\b(chpasswd|passwd)\b`),
 	regexp.MustCompile(`(?i)\b(chpasswd|passwd)\b.*\broot\b`),
 	regexp.MustCompile(`(?i)>\s*/etc/(ssh/)?sshd_config`),
+	// BUG_FIX_CONTEXT (audit round 2): prepared-payload bypasses of the first list.
+	// process substitution / command substitution feeding a shell from the network
+	regexp.MustCompile(`(?i)\b(ba|z|da|k)?sh\s+<\(`),
+	regexp.MustCompile(`(?i)\b(ba|z|da|k)?sh\s+-c\s+["'\x60]?\$\(`),
+	// fetch piped into ANY scripting interpreter (python/perl/ruby/node joined the sh family)
+	regexp.MustCompile(`(?i)\b(curl|wget)\b[^|]*\|\s*(python3?|perl|ruby|node)\b`),
+	// two-step download: fetch, make executable, run (covers && and ; chains)
+	regexp.MustCompile(`(?i)\b(curl|wget)\b.*&&\s*[^;]*chmod\s+\+x`),
+	regexp.MustCompile(`(?i)\b(curl|wget)\b[^;]*;\s*[^;]*chmod\s+\+x`),
+	// ncat raw exec mode
+	regexp.MustCompile(`(?i)\bncat\b[^|]*--exec\b`),
+	// time-based payload delay (test blind RCE)
+	regexp.MustCompile(`(?i)\bsleep\b\s+\d{2,}`),
 }
 
 // IsDestructiveCommand reports whether a command matches a catastrophic pattern (hard backstop).

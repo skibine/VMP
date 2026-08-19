@@ -623,8 +623,14 @@ func (e *apiErr) Error() string { return e.msg }
 func validateChannelConfig(chType string, config map[string]any) string {
 	switch chType {
 	case "telegram":
-		if raw, _ := config["api_url"].(string); raw != "" && !strings.HasPrefix(raw, "https://api.telegram.org") {
-			return "telegram api_url may only be https://api.telegram.org (pointing it elsewhere leaks the bot token)"
+		if raw, _ := config["api_url"].(string); raw != "" {
+			// BUG_FIX_CONTEXT (audit round 2): a prefix check let https://api.telegram.org.evil.com
+			// through - the bot token would then be POSTed to the attacker's host. Parse and
+			// compare the FULL host.
+			u, perr := url.Parse(raw)
+			if perr != nil || u.Scheme != "https" || u.Hostname() != "api.telegram.org" {
+				return "telegram api_url may only be https://api.telegram.org (pointing it elsewhere leaks the bot token)"
+			}
 		}
 	case "webhook":
 		raw, _ := config["url"].(string)

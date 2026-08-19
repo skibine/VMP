@@ -48,6 +48,10 @@ func clientIP(r *http.Request) string {
 const (
 	loginMaxAttempts = 10
 	loginWindow      = 15 * time.Minute
+	// Per-IP budget across ALL usernames: each login attempt (even against nonexistent
+	// users, via the dummy hash) burns ~64MB of argon2 - without this cap a single IP
+	// could rotate usernames and DoS the CPU/RAM (audit round 2).
+	loginIPMaxAttempts = 60
 )
 
 // dummyHash burns one argon2 verification when the username does not exist, so a missing-user
@@ -71,7 +75,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Username = strings.TrimSpace(body.Username)
 
-	lkey := clientIP(r) + "|" + body.Username
+	ip := clientIP(r)
+	if !s.ipLimiter.Allow(ip) {
+		logging.LDD(s.logger, 9, "login", "IP_RATE_LIMITED", "ip="+ip)
+		w.Header().Set("Retry-After", "300")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many attempts, try later"})
+		return
+	}
+	lkey := ip + "|" + body.Username
 	if !s.loginLimiter.Allow(lkey) {
 		logging.LDD(s.logger, 9, "login", "RATE_LIMITED", "ip="+clientIP(r)+" username="+body.Username)
 		w.Header().Set("Retry-After", "300")
@@ -176,8 +187,13 @@ func (s *Server) loginTwoFA(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// Persist the consumed TOTP step (replay guard for the ~60-90s validity window).
-		_ = s.store.SetTOTPLastStep(r.Context(), user.ID, step)
+		// Persist the consumed TOTP step atomically: if a concurrent login already consumed
+		// this step, THIS login loses the race and is refused (same code used twice).
+		won, cerr := s.store.SetTOTPLastStep(r.Context(), user.ID, step)
+		if cerr == nil && !won {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid code"})
+			return
+		}
 	}
 	token, err := auth.NewToken()
 	if err != nil {
@@ -299,11 +315,12 @@ func (s *Server) twoFAEnable(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	secret := strings.TrimSpace(r.URL.Query().Get("secret"))
-	if secret == "" {
-		if c, err := r.Cookie("vmp_2fa_pending"); err == nil {
-			secret = c.Value
-		}
+	// BUG_FIX_CONTEXT (audit round 2): the TOTP seed used to be accepted from ?secret= with
+	// PRIORITY over the cookie - leaking into proxy logs/history/Referer during the enable
+	// flow. The HttpOnly cookie set by /setup is the only channel now.
+	secret := ""
+	if c, err := r.Cookie("vmp_2fa_pending"); err == nil {
+		secret = c.Value
 	}
 	if secret == "" || !auth.Validate(secret, strings.TrimSpace(body.Code), time.Now()) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid code"})

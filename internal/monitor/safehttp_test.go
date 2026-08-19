@@ -23,6 +23,7 @@ import (
 func TestSSRF_CheckTargetURL(t *testing.T) {
 	blocked := []string{
 		"http://169.254.169.254/latest/meta-data/",
+		"http://100.100.100.200/latest/meta-data/", // Alibaba metadata (CGNAT range)
 		"http://metadata.google.internal/computeMetadata/v1/",
 		"http://metadata/",              // Azure short name
 		"file:///etc/passwd",            // scheme guard
@@ -47,7 +48,7 @@ func TestSSRF_CheckTargetURL(t *testing.T) {
 // @complexity 2
 // endregion FUNC_test_SSRF_HostBlocked
 func TestSSRF_HostBlocked(t *testing.T) {
-	for _, h := range []string{"169.254.169.254", "metadata.google.internal", "metadata", "fd00:ec2::254"} {
+	for _, h := range []string{"169.254.169.254", "100.100.100.200", "metadata.google.internal", "metadata", "fd00:ec2::254"} {
 		if !HostBlocked(h) {
 			t.Fatalf("must be blocked: %s", h)
 		}

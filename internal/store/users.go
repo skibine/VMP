@@ -124,12 +124,18 @@ func (s *Store) scanUser(ctx context.Context, q string, args ...any) (User, erro
 // @purpose Persist the consumed TOTP step so the same (or older) code cannot be replayed.
 // @complexity 2
 // endregion FUNC_SetTOTPLastStep
-func (s *Store) SetTOTPLastStep(ctx context.Context, userID, step int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE users SET totp_last_step=? WHERE id=?`, step, userID)
+// SetTOTPLastStep atomically consumes a step: the update only lands when the new step is
+// STRICTLY greater than the stored one (guarding the same-code double-spend race between two
+// concurrent 2FA logins - audit round 2). Returns false when another login already consumed
+// this (or a newer) step.
+func (s *Store) SetTOTPLastStep(ctx context.Context, userID, step int64) (bool, error) {
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE users SET totp_last_step=? WHERE id=? AND totp_last_step<?`, step, userID, step)
 	if err != nil {
-		return fmt.Errorf("SetTOTPLastStep: %w", err)
+		return false, fmt.Errorf("SetTOTPLastStep: %w", err)
 	}
-	return nil
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // EnableTOTP stores the (vault-encrypted) TOTP seed + backup-code hashes and flips the flag on.

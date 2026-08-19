@@ -24,8 +24,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/skibine/vm-pulse/internal/monitor"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -68,7 +70,15 @@ func (*WebhookChannel) Deliver(ctx context.Context, config map[string]any, msg M
 		return fmt.Errorf("webhook: marshal: %w", err)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// BUG_FIX_CONTEXT (audit round 2): the URL was validated at channel-config time only;
+	// DNS rebinding between create and delivery (TOCTOU) could retarget the POST at
+	// internal hosts. Re-check the host at delivery before dialing.
+	if u, uerr := url.Parse(target); uerr == nil {
+		if monitor.HostBlocked(u.Hostname()) {
+			return fmt.Errorf("webhook: host resolves to a blocked address (re-check failed)")
+		}
+	}
+	client := monitor.SafeClient(10 * time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("webhook: build request: %w", err)
