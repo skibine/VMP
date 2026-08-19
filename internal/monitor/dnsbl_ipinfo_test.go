@@ -20,7 +20,7 @@ func TestReverseIPv4(t *testing.T) {
 	}{
 		{"1.2.3.4", "4.3.2.1", true},
 		{"192.0.2.10", "10.2.0.192", true}, // TEST-NET-2 (RFC 5737): never a real host
-		{"::1", "", false}, // IPv6 not supported
+		{"::1", "", false},                 // IPv6 not supported
 		{"not-an-ip", "", false},
 		{"", "", false},
 	}
