@@ -16,6 +16,11 @@
 
   let vms = []
   let domains = []
+  // Semantic split (mirrors VmList): servers/VPS vs network equipment (routers, cameras,
+  // panels — kind != server). Rendered as separate sections so equipment never drowns
+  // in the server grid.
+  $: serverVms = vms.filter((v) => !v.kind || v.kind === 'server')
+  $: equipVms = vms.filter((v) => v.kind && v.kind !== 'server')
   let health = {} // id -> {status, breakdown:[{check_type,status}]}
   let domHealth = {} // domain id -> {status, reasons}
   let loading = true
@@ -215,18 +220,19 @@
       <div class="hud-label mb-1">{$t('mx.empty')}</div>
     </div>
   {:else}
-    <div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
-      {#each vms as vm (vm.id)}
-        {@const st = status(vm)}
-        <button
-          class="hud-panel p-3 text-left space-y-2 hover:border-neon-green/50 transition-colors"
-          on:click={() => dispatch('select', { kind: 'vm', id: vm.id })}
-        >
-          <div class="flex items-center gap-2">
-            <span class="h-2.5 w-2.5 rounded-full shrink-0 {lampClass(st)}" title={$t(verdictKey(st))}></span>
-            <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
-            {#if vm.kind && vm.kind !== 'server'}<span class="text-[9px] font-mono px-1 rounded border border-neon-amber/40 text-neon-amber shrink-0" title={vm.kind}>{$t('vmk.equipment')}</span>{/if}
-            <span class="font-mono text-sm text-emerald-100 truncate flex-1">{vm.name}</span>
+    {#if serverVms.length}
+      <div class="hud-label text-neon-green">{$t('list.servers', { n: serverVms.length })}</div>
+      <div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+        {#each serverVms as vm (vm.id)}
+          {@const st = status(vm)}
+          <button
+            class="hud-panel p-3 text-left space-y-2 hover:border-neon-green/50 transition-colors"
+            on:click={() => dispatch('select', { kind: 'vm', id: vm.id })}
+          >
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full shrink-0 {lampClass(st)}" title={$t(verdictKey(st))}></span>
+              <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
+              <span class="font-mono text-sm text-emerald-100 truncate flex-1">{vm.name}</span>
             {#if vm.has_creds}<Lock size={12} cls="text-neon-amber/80 shrink-0" title={$t('vd.credsSet')} />{/if}
             {#if alertedIds.has(vm.id)}<Bell size={13} cls="text-neon-green shrink-0" title={$t('list.alertOn')} />{/if}
             {#if vm.ai_enabled}<span class="hud-label text-neon-cyan shrink-0" title={vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}>ai</span>{/if}
@@ -244,9 +250,47 @@
               {/each}
             </div>
           {/if}
-        </button>
-      {/each}
-    </div>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    {#if equipVms.length}
+      <div class="border-t border-hud-line pt-3 mt-1 space-y-2">
+        <div class="hud-label text-neon-amber">{$t('list.equipment', { n: equipVms.length })}</div>
+        <div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+          {#each equipVms as vm (vm.id)}
+            {@const st = status(vm)}
+            <button
+              class="hud-panel p-3 text-left space-y-2 hover:border-neon-amber/50 transition-colors"
+              on:click={() => dispatch('select', { kind: 'vm', id: vm.id })}
+            >
+              <div class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full shrink-0 {lampClass(st)}" title={$t(verdictKey(st))}></span>
+                <span class="hud-label text-hud-dim shrink-0">#{vm.display_no || vm.id}</span>
+                <span class="font-mono text-sm text-emerald-100 truncate flex-1">{vm.name}</span>
+                {#if vm.has_creds}<Lock size={12} cls="text-neon-amber/80 shrink-0" title={$t('vd.credsSet')} />{/if}
+                {#if alertedIds.has(vm.id)}<Bell size={13} cls="text-neon-green shrink-0" title={$t('list.alertOn')} />{/if}
+                {#if vm.ai_enabled}<span class="hud-label text-neon-cyan shrink-0" title={vm.ai_enabled ? $t('vd.aiOn') : $t('vd.aiOff')}>ai</span>{/if}
+              </div>
+              <div class="text-[11px] font-mono text-hud-dim truncate">{vm.ip || vm.hostname}{vm.port_ssh && vm.port_ssh !== 22 ? ':' + vm.port_ssh : ''}</div>
+              <div class="text-xs font-mono uppercase {verdictColor(st)}">{$t(verdictKey(st))}</div>
+              {#if st !== 'ok' && st !== 'unknown'}
+                {@const r = reason(vm)}
+                {#if r}<div class="text-[11px] font-mono text-neon-amber leading-tight line-clamp-2">{r}</div>{/if}
+              {/if}
+              {#if health[vm.id]?.breakdown?.length}
+                <div class="flex flex-wrap gap-1 pt-1 border-t border-hud-line">
+                  {#each health[vm.id].breakdown as b}
+                    <span class="text-[10px] font-mono border rounded px-1 {b.status === 'ok' ? 'text-neon-green border-neon-green/30' : b.status === 'critical' ? 'text-neon-red border-neon-red/30' : 'text-hud-dim border-hud-line'}" title={b.check_type + ': ' + b.status + (b.message ? ' — ' + b.message : '')}>{b.check_type} {b.status === 'ok' ? '✓' : b.status === 'critical' ? '✗' : '·'}</span>
+                  {/each}
+                </div>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
     <div class="hud-label text-hud-dim">{$t('mx.clickHint')}</div>
 
     {#if domains.length}

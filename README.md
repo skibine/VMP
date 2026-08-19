@@ -1,8 +1,9 @@
 # VM Pulse
 
-Self-hosted, AI-first control plane for a small fleet of servers and network equipment (1–30
-hosts). Single Go binary (embedded Svelte SPA) + SQLite. No agents to install, no inbound ports
-required for monitoring. Simple enough for a first-time VPS owner, powerful enough for a homelabber.
+Self-hosted, AI-first control plane for your servers, VPS boxes and network equipment — from a
+couple of hosts to a full homelab rack. Single Go binary (embedded Svelte SPA) + SQLite. No agents
+to install, no inbound ports required for monitoring. Simple enough for a first-time VPS owner,
+powerful enough for a homelabber.
 
 > Status: **alpha.** Core planes are functional: monitoring, alerting, AI assistant (web +
 > Telegram), SSH terminal, events journal, 2FA/vault. Releases are cross-compiled binaries;

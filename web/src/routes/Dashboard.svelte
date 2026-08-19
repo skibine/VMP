@@ -4,6 +4,7 @@
   import { user, logout as doLogout, themeLight, toggleTheme, gotoSettings, appVersion } from '../lib/stores.js'
   import { t, setLocale, locale, initLocaleFromServer } from '../lib/i18n.js'
   import VmList from '../components/VmList.svelte'
+  import Watermark from '../components/Watermark.svelte'
   import VmDetail from '../components/VmDetail.svelte'
   import DomainDetail from '../components/DomainDetail.svelte'
   import FleetMatrix from '../components/FleetMatrix.svelte'
@@ -82,6 +83,7 @@
       <span class="text-[11px] text-hud-dim truncate">{$t('sec.bannerHint')}</span>
     </div>
   {/if}
+  <Watermark />
   <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0 relative z-10">
     <div class="flex items-center gap-2 shrink-0">
       <img src="/logo.png" alt="VM Pulse" class="h-6 w-6" />
@@ -103,7 +105,7 @@
 
   {#if view === 'fleet'}
     <!-- master (sidebar: all + servers + domains groups) + detail/overview + chat (resizable) -->
-    <main class="flex-1 flex min-h-0 overflow-hidden">
+    <main class="relative z-10 flex-1 flex min-h-0 overflow-hidden">
       <section class="hud-panel border-l-0 border-y-0 min-h-0 overflow-auto shrink-0" style="width:220px">
         {#key listKey}
           <VmList {selKind} {selId} on:select={onSelect} on:changed={onVmChanged} />
@@ -129,7 +131,7 @@
       </aside>
     </main>
   {:else if view === 'events'}
-    <main class="flex-1 flex min-h-0 overflow-hidden">
+    <main class="relative z-10 flex-1 flex min-h-0 overflow-hidden">
       <section class="overflow-auto hud-grid flex-1"><Events /></section>
       <div
         class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
@@ -138,7 +140,7 @@
       <aside class="hud-panel border-y-0 border-r-0 min-h-0 overflow-hidden shrink-0" style="width:{chatW}px"><ChatPanel /></aside>
     </main>
   {:else}
-    <main class="flex-1 flex min-h-0 overflow-hidden">
+    <main class="relative z-10 flex-1 flex min-h-0 overflow-hidden">
       <section class="overflow-auto hud-grid p-4 flex-1"><Settings /></section>
       <div
         class="w-1 shrink-0 cursor-col-resize bg-hud-line/60 hover:bg-neon-cyan/50 transition-colors {dragging ? 'bg-neon-cyan/70' : ''}"
