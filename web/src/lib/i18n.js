@@ -264,6 +264,8 @@ const en = {
   'set.stopConfirm': 'stop the vmpulse server? monitoring/alerts go down until it is started again.',
   'set.stopSent': 'stopping… waiting for the server to go away',
   'set.stopFail': 'stop request failed (server already down?)',
+  'sec.banner': 'plaintext secrets',
+  'sec.bannerHint': 'this instance runs in server mode with the vault disabled: SSH passwords/keys, TOTP seeds and API keys are stored UNENCRYPTED in the database file. restart with -ask-passphrase to arm encryption.',
 
   // alerts
   'al.channels': 'channels // {n}',
@@ -693,6 +695,8 @@ const ru = {
   'set.stopConfirm': 'остановить сервер vmpulse? мониторинг и оповещения лягут, пока его не запустят снова.',
   'set.stopSent': 'останавливаю… ждём, пока сервер потухнет',
   'set.stopFail': 'запрос остановки не прошёл (сервер уже выключен?)',
+  'sec.banner': 'секреты не зашифрованы',
+  'sec.bannerHint': 'инстанс работает в server-режиме с выключенным vault: ssh-пароли/ключи, TOTP-сиды и API-ключи лежат в файле базы ОТКРЫТЫМ текстом. перезапустите с -ask-passphrase, чтобы включить шифрование.',
 
   // alerts
   'al.channels': 'каналы // {n}',

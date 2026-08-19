@@ -195,8 +195,13 @@ func extractToken(r *http.Request) string {
 		return c.Value
 	}
 	// WebSocket handshakes (browsers cannot set custom headers): allow token via query param.
-	// The token is still validated server-side against sessions; same-origin only in practice.
-	return r.URL.Query().Get("token")
+	// BUG_FIX_CONTEXT (2026-08-19 audit 2.5): previously accepted for ANY request - the token
+	// then leaks into proxy logs / browser history / Referer. Now gated on the Upgrade header
+	// actually requesting websocket; everything else must use Authorization or the cookie.
+	if strings.Contains(strings.ToLower(r.Header.Get("Upgrade")), "websocket") {
+		return r.URL.Query().Get("token")
+	}
+	return ""
 }
 
 func deny(w http.ResponseWriter, logger *slog.Logger, reason string) {

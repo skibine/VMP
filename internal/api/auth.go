@@ -399,6 +399,11 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Session revocation: every existing session (incl. possibly stolen ones) dies with the
+	// old credential. The CURRENT caller must re-login - the SPA token store will 401.
+	if err := s.store.DeleteSessionsForUser(r.Context(), uid); err != nil {
+		logging.LDD(s.logger, 9, "changePassword", "REVOKE_FAIL", err.Error())
+	}
 	_ = audit.Append(s.store.DB, s.logger, audit.Entry{
 		Plane: audit.PlaneB, UserID: uid, Action: "auth.password_change", Success: true,
 	})

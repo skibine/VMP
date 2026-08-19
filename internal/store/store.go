@@ -56,6 +56,10 @@ type Store struct {
 	vault  *crypto.Vault // nil = at-rest encryption disabled
 }
 
+// VaultArmed reports whether at-rest encryption is active (false = secrets stored plaintext;
+// the UI renders a persistent warning banner in server mode).
+func (s *Store) VaultArmed() bool { return s.vault != nil }
+
 // region FUNC_Open [DOMAIN(8): Storage; CONCEPT(8): Bootstrap; TECH(9): SQLite,WAL]
 // @purpose Open (or create) the database file, enable WAL + foreign keys, and bring the
 //

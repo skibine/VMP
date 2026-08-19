@@ -55,6 +55,16 @@
   function stopDrag() { if (dragging) { dragging = false; localStorage.setItem('vmp_chat_w', String(chatW)) } }
 
   let gotoUnsub
+  // Security banner: server-mode instance with PLAINTEXT secrets (vault unarmed) - the
+  // operator must not forget the SQLite file (and its .bak) is fully readable if stolen.
+  let secWarn = false
+  onMount(async () => {
+    try {
+      const st = await api.securityStatus()
+      secWarn = st && st.mode === 'server' && st.vault_armed === false
+    } catch (_) {}
+  })
+
   onMount(() => {
     initLocaleFromServer()
     api.version().then((v) => { if (v && v.version) appVersion.set(v.version) }).catch(() => {})
@@ -66,6 +76,12 @@
 <svelte:window on:mousemove={onMove} on:mouseup={stopDrag} />
 
 <div class="h-full flex flex-col overflow-hidden">
+  {#if secWarn}
+    <div class="hud-panel border-x-0 border-t-0 border-neon-amber/50 px-4 py-1.5 flex items-center gap-2 shrink-0 bg-neon-amber/5">
+      <span class="hud-label text-neon-amber shrink-0">// {$t('sec.banner')}</span>
+      <span class="text-[11px] text-hud-dim truncate">{$t('sec.bannerHint')}</span>
+    </div>
+  {/if}
   <header class="hud-panel border-x-0 border-t-0 px-4 py-2 flex items-center gap-4 shrink-0 relative z-10">
     <div class="flex items-center gap-2 shrink-0">
       <img src="/logo.png" alt="VM Pulse" class="h-6 w-6" />

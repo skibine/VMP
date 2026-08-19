@@ -109,6 +109,7 @@ export const api = {
   aiHistory: () => req('/api/ai/history'),
   clearAIHistory: () => req('/api/ai/history', { method: 'DELETE' }),
   shutdownServer: () => req('/api/server/shutdown', { method: 'POST' }),
+  securityStatus: () => req('/api/security/status'),
   auditEvents: (params) => {
     const q = Object.entries(params || {}).filter(([, v]) => v !== '' && v != null).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&')
     return req('/api/audit' + (q ? '?' + q : ''))

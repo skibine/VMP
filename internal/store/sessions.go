@@ -32,6 +32,23 @@ func (s *Store) CreateSession(ctx context.Context, token string, userID int64, t
 	return nil
 }
 
+// region FUNC_DeleteSessionsForUser [DOMAIN(9): Security; CONCEPT(7): SessionRevocation; TECH(5): SQLite]
+// @purpose Revoke EVERY session of a user (password change, 2FA toggle, lockout response) -
+//
+//	a stolen session must not outlive the credential that guards it.
+//
+// @complexity 2
+// endregion FUNC_DeleteSessionsForUser
+func (s *Store) DeleteSessionsForUser(ctx context.Context, userID int64) error {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, userID); err != nil {
+		return fmt.Errorf("DeleteSessionsForUser: %w", err)
+	}
+	// Opportunistic hygiene: expired rows are invisible to GetSession anyway.
+	_, _ = s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	return nil
+}
+
 // GetSession returns the userID for a valid (existing, non-expired) token.
 func (s *Store) GetSession(ctx context.Context, token string) (int64, bool, error) {
 	var userID int64

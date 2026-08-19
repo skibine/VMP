@@ -49,6 +49,7 @@ type Server struct {
 	agent        *ai.Agent          // nil when AI is not configured (chat endpoint -> 503)
 	pending2FA   *auth.PendingTwoFA // in-memory bridge for two-step 2FA login
 	loginLimiter *auth.Limiter      // brute-force damper: ip+username sliding window
+	deployMode   string             // config mode ("local"|"server") - drives the UI security banner
 	chatMirror   ChatMirror         // optional web->telegram chat relay
 	shutdownFn   func()             // graceful-stop trigger (main wires it to the signal ctx cancel)
 	crud         *crudAPI           // owns the domain-health cache + warmer loop
@@ -73,7 +74,8 @@ func (s *Server) WithChatMirror(m ChatMirror) *Server { s.chatMirror = m; return
 // Tests build the server without Use, so they exercise routes unauthenticated.
 func (s *Server) Use(mw func(http.Handler) http.Handler) {
 	if s.srv != nil {
-		s.srv.Handler = mw(s.mux)
+		// securityHeaders wraps OUTERMOST: hardening applies to API and SPA alike.
+		s.srv.Handler = securityHeaders(mw(s.mux))
 	}
 }
 
@@ -89,6 +91,7 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	srv := &Server{store: s, logger: logger, mux: mux, pending2FA: auth.NewPendingTwoFA(),
 		loginLimiter: auth.NewLimiter(loginMaxAttempts, loginWindow), Version: Version}
 	mux.HandleFunc("/healthz", srv.healthHandler)
+	mux.HandleFunc("GET /api/security/status", srv.securityStatus) // auth-gated (not in public list)
 	// Public build-version endpoint (no auth) so the login page + header can show the version stamp
 	// for build-mismatch debugging (sandbox vs operator PC).
 	mux.HandleFunc("/api/version", srv.versionHandler)

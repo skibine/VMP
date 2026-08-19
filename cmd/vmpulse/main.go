@@ -222,6 +222,7 @@ func main() {
 	tgMgr := &tgchat.Manager{Store: s, Agent: agent, Approver: server, Logger: logger}
 	server.WithChatMirror(tgMgr)  // web chat turns relay to telegram (no-op w/o agent_chat_enabled)
 	server.WithShutdownFunc(stop) // Settings stop button -> same graceful path as Ctrl+C/SIGTERM
+	server.WithDeployMode(cfg.Mode)
 	go tgMgr.Run(ctx)
 
 	// Plane A metrics pull-poller: periodically SSHes metrics-enabled VMs (reusing the vault) and
