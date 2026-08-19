@@ -14,6 +14,8 @@ package install
 import (
 	"context"
 	"os/exec"
+
+	"github.com/skibine/vmp/internal/sysproc"
 	"strings"
 	"time"
 )
@@ -24,6 +26,7 @@ func isElevated() bool {
 	cctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "net", "session")
+	sysproc.Attach(cmd) // no console flash on windowsgui builds
 	return cmd.Run() == nil
 }
 

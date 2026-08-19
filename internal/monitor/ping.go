@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/skibine/vmp/internal/sysproc"
 	"runtime"
 	"strconv"
 	"strings"
@@ -121,8 +123,10 @@ func (PingChecker) Run(ctx context.Context, target string, params map[string]any
 		// Direct call to ping.exe via its full path (SystemRoot\System32\ping.exe) — no shell wrapper,
 		// so it never trips "binary not found" on environments where bare-name PATH lookup fails.
 		cmd = exec.CommandContext(cctx, windowsPing(), "-n", "3", "-w", strconv.FormatInt(perWait.Milliseconds(), 10), target)
+		sysproc.Attach(cmd) // no console flash on windowsgui builds
 	} else {
 		cmd = exec.CommandContext(cctx, "ping", "-c", "3", "-W", strconv.FormatInt(int64(perWait.Seconds()), 10), target)
+		sysproc.Attach(cmd) // no-op on unix
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {

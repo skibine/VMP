@@ -13,6 +13,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+
+	"github.com/skibine/vmp/internal/sysproc"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +55,7 @@ func runCmd(ctx context.Context, timeout time.Duration, name string, args ...str
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, name, args...)
+	sysproc.Attach(cmd) // doctor collectors: no console flash on windowsgui builds
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	err := cmd.Run()
