@@ -79,6 +79,8 @@ func DomainTools(s *store.Store) []Tool {
 				},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: result carries externally-controlled content - mark the turn.
+				MarkExternalContent(ctx)
 				var name string
 				if id, ok := intArg(args, "domain_id"); ok && id > 0 {
 					d, err := s.GetDomain(ctx, id)

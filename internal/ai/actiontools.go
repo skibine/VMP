@@ -20,6 +20,8 @@ package ai
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/skibine/vm-pulse/internal/store"
 )
@@ -39,6 +41,9 @@ func strArg(args map[string]any, key string) (string, bool) {
 
 // ActionTools builds the mutating action tools: propose_command and get_action.
 func ActionTools(s *store.Store, exec ActionExecutor) []Tool {
+	// execBudget bounds silent auto-executions to autoExecPerHour per PROCESS hour. RAM-only:
+	// a restart resets it, which is fine - the bound targets runaway agent loops, not humans.
+	execBudget := newHourlyBudget(autoExecPerHour)
 	return []Tool{
 		{
 			Name:        "propose_command",
@@ -69,7 +74,19 @@ func ActionTools(s *store.Store, exec ActionExecutor) []Tool {
 				if !vm.AIEnabled {
 					return jsonStr(map[string]any{"error": "ai access disabled for this vm", "vm_id": vmID})
 				}
-				if s.IsAIAutoApprove(ctx) && exec != nil {
+				// BUG_FIX_CONTEXT (2026-08-19 audit): auto-approve is the prompt-injection
+				// payoff step. Two brakes, both forcing PENDING (operator's ✅/❌) instead of
+				// silent execution:
+				//   1. this turn ingested untrusted external content (fetched page / whois /
+				//      scan banner) - the classic injection carrier;
+				//   2. the hourly auto-execution budget is exhausted (bounds any runaway loop).
+				suppress := ""
+				if ExternalContentSeen(ctx) {
+					suppress = "auto-approve suppressed: untrusted external content was fetched in this turn"
+				} else if !execBudget.allow() {
+					suppress = "auto-approve suppressed: hourly auto-execution budget exhausted"
+				}
+				if suppress == "" && s.IsAIAutoApprove(ctx) && exec != nil {
 					out, runErr := exec.Execute(ctx, vmID, command)
 					status := "done"
 					if runErr != nil {
@@ -80,6 +97,11 @@ func ActionTools(s *store.Store, exec ActionExecutor) []Tool {
 					})
 					_ = s.SetAIActionStatus(ctx, id, status, truncateForStore(out+"\n"+errToStr(runErr)))
 					return jsonStr(map[string]any{"executed": true, "status": status, "output": out, "error": errToStr(runErr)})
+				}
+				if reason == "" && suppress != "" {
+					reason = suppress
+				} else if suppress != "" {
+					reason = suppress + "; " + reason
 				}
 				id, err := s.CreateAIAction(ctx, store.AIAction{VMID: vmID, Command: command, Reason: reason})
 				if err != nil {
@@ -126,4 +148,38 @@ func truncateForStore(s string) string {
 		return s[:8000] + "\n...[truncated]..."
 	}
 	return s
+}
+
+// autoExecPerHour caps silent auto-approved executions per rolling hour (prompt-injection
+// blast-radius bound: an injected loop can at worst burn N commands before the operator
+// sees a stream of pending ✅/❌ announcements in chat).
+const autoExecPerHour = 10
+
+// hourlyBudget is a rolling-window counter.
+type hourlyBudget struct {
+	mu    sync.Mutex
+	times []time.Time
+}
+
+func newHourlyBudget(max int) *hourlyBudget {
+	return &hourlyBudget{times: make([]time.Time, 0, max)}
+}
+
+// allow records an execution slot and reports whether one fits the rolling hour.
+func (h *hourlyBudget) allow() bool {
+	now := time.Now()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	kept := h.times[:0]
+	for _, t := range h.times {
+		if now.Sub(t) < time.Hour {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= cap(h.times) {
+		h.times = kept
+		return false
+	}
+	h.times = append(kept, now)
+	return true
 }

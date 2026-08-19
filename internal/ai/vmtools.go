@@ -98,6 +98,8 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required": []string{"vm_id", "check_type"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: result carries externally-controlled content - mark the turn.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				ctype, _ := strArg(args, "check_type")
 				vm, _, err := vmTarget(ctx, vmID)
@@ -164,6 +166,8 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				"required":   []string{"vm_id"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: result carries externally-controlled content - mark the turn.
+				MarkExternalContent(ctx)
 				vmID, _ := intArg(args, "vm_id")
 				_, host, err := vmTarget(ctx, vmID)
 				if err != nil {
@@ -190,6 +194,8 @@ func VMTools(s *store.Store, reader VMDataReader) []Tool {
 				},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: result carries externally-controlled content - mark the turn.
+				MarkExternalContent(ctx)
 				url, _ := strArg(args, "url")
 				if url == "" {
 					vmID, _ := intArg(args, "vm_id")

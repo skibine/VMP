@@ -102,12 +102,34 @@ func prepareSudo(command, sudoPassword string) (string, string) {
 // backstop must block recursive deletes of root AND system directories (/, /home, /etc, ...),
 // not just bare `rm -rf /`. Normal cleanups still pass: `rm -rf /home/user/temp` (subpath) and
 // `rm /tmp/file` (no -r) are allowed.
+// BUG_FIX_CONTEXT (2026-08-19 audit): the old list covered only disk-wipe/fork-bomb class
+// payloads. Remote-code-execution exfiltration patterns (curl|bash, /dev/tcp reverse shells,
+// eval of fetched content, chmod 777 /) passed freely - and prompt injection via monitored
+// pages can request exactly those. Extended to the classic "attacker menu".
 var destructivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\brm\s+-[a-z]*r[a-z]*\s+/(?:home|etc|usr|var|boot|bin|sbin|lib|lib64|root|opt|srv|proc|sys|dev|run)?/?(?:\s|$)`),
 	regexp.MustCompile(`(?i)\bmkfs\b`),
 	regexp.MustCompile(`(?i)\bdd\b.*\bof=/dev/(sd|nvme|vd|hd|xvd)`),
 	regexp.MustCompile(`(?i):\s*\(\s*\)\s*\{`), // fork bomb :(){:|:&};:
 	regexp.MustCompile(`(?i)\bshutdown\b.*\bnow\b`),
+	// download-and-execute pipelines (curl/wget piped or chained into a shell)
+	regexp.MustCompile(`(?i)\b(curl|wget)\b[^|;&]*[|;]\s*(sudo\s+)?(ba|z|da|k)?sh\b`),
+	regexp.MustCompile(`(?i)\b(curl|wget)\b.*&&\s*(sudo\s+)?(ba|z|da|k)?sh\b`),
+	// eval/exec of variable or fetched content
+	regexp.MustCompile(`(?i)\beval\b\s+["'$]`),
+	regexp.MustCompile(`(?i)\bbase64\b[^|]*\|\s*(ba|z|da)?sh\b`),
+	// reverse shells: /dev/tcp redirect target, bash -i spawned networked, nc -e
+	regexp.MustCompile(`/dev/tcp/`),
+	regexp.MustCompile(`(?i)\b(ba|z|da|k)?sh\s+-i\b.*(<|>)`),
+	regexp.MustCompile(`(?i)\bnc\b[^|]*\s-[a-z]*e[a-z]*\b`),
+	regexp.MustCompile(`(?i)\bsocat\b.*\b(ba|z)?sh\b`),
+	// permission wholesale + auth tampering
+	regexp.MustCompile(`(?i)\bchmod\s+-R\s+777\s+/`), // chmod -R 777 / or /root etc
+	regexp.MustCompile(`(?i)\bchmod\s+-R\s+777\s+/(?:root|etc|usr|var|home)(?:\s|/|$)`),
+	regexp.MustCompile(`(?i)\brm\s+-[a-z]*f[a-z]*\s+/(?:root/)?\.ssh/authorized_keys`),
+	regexp.MustCompile(`(?i)\broot\b.*\b(chpasswd|passwd)\b`),
+	regexp.MustCompile(`(?i)\b(chpasswd|passwd)\b.*\broot\b`),
+	regexp.MustCompile(`(?i)>\s*/etc/(ssh/)?sshd_config`),
 }
 
 // IsDestructiveCommand reports whether a command matches a catastrophic pattern (hard backstop).

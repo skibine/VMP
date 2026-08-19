@@ -111,6 +111,9 @@ func (a *Agent) Ask(ctx context.Context, message string, history []Message) (Ask
 	msgs = append(msgs, Message{Role: "user", Content: message})
 
 	reply := AskReply{Trace: []TraceStep{}}
+	// Fresh per-turn trust state: tools that ingest external content mark it, propose_command
+	// consults it (auto-approve suppression - the prompt-injection chain breaker).
+	ctx = WithTurnState(ctx)
 	logging.LDD(a.Logger, 8, "Ask", "USER", truncate(message, 120))
 	for i := 0; i < a.maxIters(); i++ {
 		resp, err := a.Provider.Chat(ctx, ChatRequest{Model: a.Model, Messages: msgs, Tools: a.Tools.Tools()})

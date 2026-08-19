@@ -272,6 +272,8 @@ func HostProbeTools() []Tool {
 				"required": []string{"target"},
 			},
 			Run: func(ctx context.Context, args map[string]any) (string, error) {
+				// UNTRUSTED SOURCE: result carries externally-controlled content - mark the turn.
+				MarkExternalContent(ctx)
 				target, _ := args["target"].(string)
 				target = strings.TrimSpace(target)
 				if target == "" {
