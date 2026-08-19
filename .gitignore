@@ -45,7 +45,6 @@ coverage.out
 
 # Playwright MCP session artifacts (transient screenshots/snapshots)
 /.playwright-mcp/
-debug-*.png
 *.png
 # Product assets (logo/favicons) are committed despite the global png ban
 !web/public/*.png
