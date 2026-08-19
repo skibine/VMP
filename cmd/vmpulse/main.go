@@ -40,6 +40,7 @@ import (
 	"github.com/skibine/vmp/internal/monitor"
 	"github.com/skibine/vmp/internal/ssh"
 	"github.com/skibine/vmp/internal/store"
+	"github.com/skibine/vmp/internal/sysproc"
 	"github.com/skibine/vmp/internal/tgchat"
 	"golang.org/x/term"
 )
@@ -578,6 +579,12 @@ func runDoctor(args []string) {
 	}
 	// Logs go to stderr so the human report (and --json) on stdout stays clean.
 	logger := logging.Setup(parseLevel("warn"), os.Stderr)
+	// GUI-subsystem builds are born without console stdio: attach the parent's console
+	// (when launched from one) so the report is actually visible in the terminal.
+	out := io.Writer(os.Stdout)
+	if con, err := sysproc.ConsoleOut(); err == nil {
+		out = con
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	rep := install.Audit(ctx, logger)
@@ -587,10 +594,10 @@ func runDoctor(args []string) {
 			fmt.Fprintln(os.Stderr, "doctor: marshal:", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(b))
+		fmt.Fprintln(out, string(b))
 		return
 	}
-	install.WriteText(os.Stdout, rep)
+	install.WriteText(out, rep)
 	if rep.Verdict.Severity == "critical" {
 		os.Exit(2) // non-zero so installers/wizards can gate on a critical host
 	}

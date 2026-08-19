@@ -59,6 +59,29 @@
     twoFA = null
     error = ''
   }
+
+  // Host audit from the login page: the CLI `vmpulse doctor` prints nothing on windowsgui
+  // builds, so the button is the only discoverable entry point for non-console operators.
+  let docOpen = false
+  let docBusy = false
+  let docErr = ''
+  let doc = null
+  async function runDoctor() {
+    docOpen = true
+    docBusy = true
+    docErr = ''
+    doc = null
+    try {
+      doc = await api.doctor()
+    } catch (e) {
+      docErr = e.message
+    } finally {
+      docBusy = false
+    }
+  }
+  function sevColor(s) {
+    return s === 'critical' ? 'text-neon-red border-neon-red/40' : s === 'warn' ? 'text-neon-amber border-neon-amber/40' : 'text-neon-green border-neon-green/40'
+  }
 </script>
 
 <div class="min-h-full flex items-center justify-center hud-grid p-6">
@@ -111,4 +134,46 @@
       <button type="button" class="hud-btn w-full" on:click={backToPassword}>{$t('login.back')}</button>
     {/if}
   </form>
+    <div class="mt-4 flex items-center justify-center gap-2">
+      <button type="button" class="text-[11px] font-mono text-hud-dim hover:text-neon-cyan underline" on:click={runDoctor}>{$t('login.doctor')}</button>
+    </div>
+
+  {#if docOpen}
+    <div class="fixed inset-0 z-[90] bg-black/70 flex items-center justify-center p-4" on:click={() => (docOpen = false)} on:contextmenu|preventDefault={() => (docOpen = false)}>
+      <div class="hud-panel w-full max-w-xl p-5 space-y-3 max-h-[80vh] overflow-auto" on:click|stopPropagation>
+        <div class="hud-label text-neon-cyan">// {$t('login.doctorTitle')}</div>
+        {#if docBusy}
+          <div class="hud-label text-neon-cyan"><span class="hud-spinner"></span> {$t('login.doctorBusy')}</div>
+        {:else if docErr}
+          <div class="text-xs font-mono text-neon-red">{docErr}</div>
+          <div class="text-[11px] text-hud-dim">{$t('login.doctorFail')}</div>
+        {:else if doc}
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-mono px-2 py-1 rounded border {sevColor(doc.verdict?.severity)} uppercase">{doc.verdict?.severity ?? '—'}</span>
+            <span class="text-xs font-mono text-hud-dim">risk score: {doc.verdict?.score ?? '?'}/100</span>
+            <span class="ml-auto text-[10px] font-mono text-hud-dim">{doc.context?.distro || doc.platform}</span>
+          </div>
+          {#if doc.verdict?.findings?.length}
+            <div class="space-y-1.5">
+              {#each doc.verdict.findings as f (f.id)}
+                <div class="border rounded p-2 space-y-0.5 {sevColor(f.severity).includes('neon-red') ? 'border-neon-red/30' : sevColor(f.severity).includes('neon-amber') ? 'border-neon-amber/30' : 'border-neon-green/30'}">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[9px] font-mono px-1 rounded border {sevColor(f.severity)} uppercase">{f.severity}</span>
+                    <span class="text-xs font-mono text-emerald-100">{f.title}</span>
+                  </div>
+                  {#if f.detail}<div class="text-[11px] text-hud-dim leading-snug">{f.detail}</div>{/if}
+                  {#if f.recommendation}<div class="text-[11px] text-neon-cyan/80 leading-snug">→ {f.recommendation}</div>{/if}
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="text-xs font-mono text-neon-green">{$t('login.doctorClean')}</div>
+          {/if}
+        {/if}
+        <div class="flex justify-end pt-1 border-t border-hud-line">
+          <button class="hud-btn !py-1" on:click={() => (docOpen = false)}>{$t('g.close')}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

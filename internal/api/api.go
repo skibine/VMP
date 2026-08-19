@@ -97,6 +97,7 @@ func New(s *store.Store, addr string, logger *slog.Logger) *Server {
 	// Public build-version endpoint (no auth) so the login page + header can show the version stamp
 	// for build-mismatch debugging (sandbox vs operator PC).
 	mux.HandleFunc("/api/version", srv.versionHandler)
+	mux.HandleFunc("GET /api/doctor", srv.handleDoctorPublic) // login-page host audit (local mode only; gated inside)
 	mux.HandleFunc("POST /api/auth/login", srv.login)
 	mux.HandleFunc("POST /api/auth/login/2fa", srv.loginTwoFA)
 	mux.HandleFunc("POST /api/auth/logout", srv.logout)

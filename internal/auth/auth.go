@@ -180,6 +180,11 @@ func isPublic(r *http.Request) bool {
 	if r.URL.Path == "/api/version" && r.Method == http.MethodGet {
 		return true
 	}
+	// Login-page host audit: public by design, but the handler itself refuses server-mode
+	// deployments (host posture must not leak unauthenticated from an internet-facing box).
+	if r.URL.Path == "/api/doctor" && r.Method == http.MethodGet {
+		return true
+	}
 	if r.Method != http.MethodPost {
 		return false
 	}

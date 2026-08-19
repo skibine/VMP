@@ -67,6 +67,7 @@ export const api = {
   domainIntel: (id) => req('/api/domains/' + id + '/intel'),
   resolveTelegramChatId: (token) => req('/api/channels/telegram/resolve', { method: 'POST', body: { bot_token: token } }),
   version: () => req('/api/version'),
+  doctor: () => req('/api/doctor'),
   listVms: () => req('/api/vms'),
   getVm: (id) => req('/api/vms/' + id),
   createVm: (vm) => req('/api/vms', { method: 'POST', body: vm }),

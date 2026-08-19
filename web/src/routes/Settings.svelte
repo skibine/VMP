@@ -307,10 +307,14 @@
 </script>
 
 <div class="max-w-6xl mx-auto space-y-6">
-  <!-- Two rows of side-by-side panels: account (password + 2FA), then AI provider + delivery
-       channels. items-start keeps each panel compact; collapses to one column on narrow screens. -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-  <section class="hud-panel p-5 space-y-3">
+  <!-- Masonry: CSS multi-column with break-inside-avoid — every panel keeps whole, columns
+       fill independently (tops aligned, NO row-height gaps when neighbors differ in height:
+       the 2FA panel with stored creds is taller than account, and AI/channels just flow under
+       whichever column has room). Collapses to one column on narrow screens. -->
+    <!-- Independent columns: tops aligned, each column flows vertically with NO row alignment to the neighbor (the 2FA panel grows with stored creds; AI/channels simply start right under whatever is above them in THEIR column). Collapses on narrow screens. -->
+  <div class="flex flex-col lg:flex-row gap-6 items-start">
+    <div class="flex-1 min-w-0 w-full space-y-6">
+<section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('set.pwTitle')}</div>
     <div class="grid grid-cols-2 gap-3 max-w-lg">
       <label class="block space-y-1">
@@ -328,75 +332,7 @@
     </div>
     <p class="text-[11px] text-hud-dim">// {$t('set.pwHint')}</p>
   </section>
-  <section class="hud-panel p-5 space-y-3">
-    <div class="flex items-center gap-2">
-      <div class="hud-label text-neon-cyan">{$t('set.2faTitle')}</div>
-      {#if twofa.loaded}
-        <span class="hud-label {twofa.enabled ? 'text-neon-green' : 'text-hud-dim'} ml-auto">{twofa.enabled ? $t('set.2faOn') : $t('set.2faOff')}</span>
-      {/if}
-    </div>
-    <p class="text-xs text-hud-dim">{$t('set.2faHint')}</p>
-
-    {#if twofa.enabled}
-      <div class="space-y-2">
-        <p class="text-xs text-neon-green font-mono">{$t('set.2faIsOn')}</p>
-        {#if twofa.has_vm_credentials}
-          <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5 space-y-1">
-            <div>{$t('set.2faCannotDisable')}</div>
-            {#if twofa.cred_vms && twofa.cred_vms.length}
-              <div class="text-hud-dim">{$t('set.2faClearThese')}:</div>
-              <div class="flex flex-wrap gap-1">
-                {#each twofa.cred_vms as v (v.id)}
-                  <span class="inline-flex items-center gap-1 border border-neon-amber/40 rounded px-1.5 py-0.5 text-neon-amber">🔒 {v.name}</span>
-                {/each}
-              </div>
-              <div class="text-hud-dim">{$t('set.2faClearHint')}</div>
-            {/if}
-          </div>
-        {/if}
-        <label class="block space-y-1">
-          <span class="hud-label">{$t('set.passwordToDisable')}</span>
-          <input class="hud-input" type="password" bind:value={disablePw} placeholder="••••••" />
-        </label>
-        <button class="hud-btn !text-neon-red border-neon-red/40" on:click={disable} disabled={twofaBusy || twofa.has_vm_credentials}>{twofaBusy ? '…' : $t('set.disable2fa')}</button>
-      </div>
-    {:else if !setup}
-      <button class="hud-btn hud-btn-primary" on:click={startSetup} disabled={twofaBusy}>{twofaBusy ? '…' : $t('set.enable2fa')}</button>
-    {:else}
-      <div class="space-y-3">
-        <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5">
-          {$t('set.2faWarn')}
-        </div>
-        <p class="text-xs text-hud-dim">{$t('set.2faStep1')}</p>
-        <div class="flex gap-3 items-start">
-          {#if setup.qr_data_url}<img src={setup.qr_data_url} alt="2FA QR" class="w-36 h-36 bg-white p-1 rounded" />{/if}
-          <div class="text-xs font-mono space-y-1">
-            <div class="hud-label text-hud-dim">{$t('set.secret')}</div>
-            <div class="text-emerald-200 break-all">{setup.secret}</div>
-          </div>
-        </div>
-        <label class="block space-y-1">
-          <span class="hud-label">{$t('set.2faStep2')}</span>
-          <input class="hud-input" bind:value={code} placeholder="123456" />
-        </label>
-        <button class="hud-btn hud-btn-primary" on:click={enable} disabled={twofaBusy || !code}>{twofaBusy ? '…' : $t('set.confirmEnable')}</button>
-      </div>
-    {/if}
-
-    {#if backupCodes}
-      <div class="border border-neon-amber/40 rounded p-3 bg-neon-amber/5 space-y-2">
-        <div class="hud-label text-neon-amber">{$t('set.backupCodes')}</div>
-        <div class="font-mono text-xs grid grid-cols-2 gap-1">{#each backupCodes as c}<span class="text-emerald-200">{c}</span>{/each}</div>
-        <p class="text-[11px] text-hud-dim">{$t('set.backupHint')}</p>
-      </div>
-    {/if}
-    {#if twofaMsg}<div class="text-xs text-neon-green font-mono">{twofaMsg}</div>{/if}
-    {#if twofaErr}<div class="text-xs text-neon-red font-mono">{twofaErr}</div>{/if}
-  </section>
-  </div>
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-
-  <section class="hud-panel p-5 space-y-3">
+<section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('set.aiTitle')}</div>
     <!-- Form column: inputs do NOT span the full page width (operator feedback — "трэшачок");
          md ≈ provider select / key / model fields at a comfortable reading width. -->
@@ -486,38 +422,74 @@
     </div>
     </div>
   </section>
+    </div>
+    <div class="flex-1 min-w-0 w-full space-y-6">
+<section class="hud-panel p-5 space-y-3">
+    <div class="flex items-center gap-2">
+      <div class="hud-label text-neon-cyan">{$t('set.2faTitle')}</div>
+      {#if twofa.loaded}
+        <span class="hud-label {twofa.enabled ? 'text-neon-green' : 'text-hud-dim'} ml-auto">{twofa.enabled ? $t('set.2faOn') : $t('set.2faOff')}</span>
+      {/if}
+    </div>
+    <p class="text-xs text-hud-dim">{$t('set.2faHint')}</p>
 
-  {#if spOpen}
-    <div class="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" on:click={() => (spOpen = false)} on:contextmenu|preventDefault={() => (spOpen = false)}>
-      <div class="hud-panel w-full max-w-2xl p-5 space-y-3 relative" on:click|stopPropagation>
-        <div class="hud-label text-neon-cyan">// {$t('set.spTitle')}</div>
-        <p class="text-[11px] text-hud-dim leading-snug">{$t('set.spHint')}</p>
-        <div class="flex items-center gap-4">
-          <label class="flex items-center gap-1.5 cursor-pointer text-xs font-mono">
-            <input type="radio" class="accent-neon-green" name="spmode" value="append" bind:group={spMode} />
-            <span class={spMode === 'append' ? 'text-neon-green' : 'text-hud-dim'}>{$t('set.spAppend')}</span>
-          </label>
-          <label class="flex items-center gap-1.5 cursor-pointer text-xs font-mono">
-            <input type="radio" class="accent-neon-red" name="spmode" value="replace" bind:group={spMode} />
-            <span class={spMode === 'replace' ? 'text-neon-red' : 'text-hud-dim'}>{$t('set.spReplace')}</span>
-          </label>
-        </div>
-        {#if spMode === 'replace'}
-          <div class="text-[11px] font-mono text-neon-amber">{$t('set.spReplaceWarn')}</div>
+    {#if twofa.enabled}
+      <div class="space-y-2">
+        <p class="text-xs text-neon-green font-mono">{$t('set.2faIsOn')}</p>
+        {#if twofa.has_vm_credentials}
+          <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5 space-y-1">
+            <div>{$t('set.2faCannotDisable')}</div>
+            {#if twofa.cred_vms && twofa.cred_vms.length}
+              <div class="text-hud-dim">{$t('set.2faClearThese')}:</div>
+              <div class="flex flex-wrap gap-1">
+                {#each twofa.cred_vms as v (v.id)}
+                  <span class="inline-flex items-center gap-1 border border-neon-amber/40 rounded px-1.5 py-0.5 text-neon-amber">🔒 {v.name}</span>
+                {/each}
+              </div>
+              <div class="text-hud-dim">{$t('set.2faClearHint')}</div>
+            {/if}
+          </div>
         {/if}
-        <textarea class="hud-input w-full h-56 font-mono text-xs leading-snug" placeholder={$t('set.spPlaceholder')} bind:value={spText} maxlength="16384"></textarea>
-        <div class="flex items-center gap-2 pt-1 border-t border-hud-line">
-          <span class="text-[9px] font-mono text-neon-amber/70 select-none" title="easter egg">Make no mistakes!</span>
-          <div class="ml-auto flex items-center gap-2">
-            <button class="hud-btn" on:click={() => (spOpen = false)}>{$t('g.cancel')}</button>
-            <button class="hud-btn hud-btn-primary" on:click={saveSP} disabled={spBusy}>{spBusy ? '…' : $t('g.ok')}</button>
+        <label class="block space-y-1">
+          <span class="hud-label">{$t('set.passwordToDisable')}</span>
+          <input class="hud-input" type="password" bind:value={disablePw} placeholder="••••••" />
+        </label>
+        <button class="hud-btn !text-neon-red border-neon-red/40" on:click={disable} disabled={twofaBusy || twofa.has_vm_credentials}>{twofaBusy ? '…' : $t('set.disable2fa')}</button>
+      </div>
+    {:else if !setup}
+      <button class="hud-btn hud-btn-primary" on:click={startSetup} disabled={twofaBusy}>{twofaBusy ? '…' : $t('set.enable2fa')}</button>
+    {:else}
+      <div class="space-y-3">
+        <div class="text-[11px] font-mono text-neon-amber border border-neon-amber/30 rounded p-2 bg-neon-amber/5">
+          {$t('set.2faWarn')}
+        </div>
+        <p class="text-xs text-hud-dim">{$t('set.2faStep1')}</p>
+        <div class="flex gap-3 items-start">
+          {#if setup.qr_data_url}<img src={setup.qr_data_url} alt="2FA QR" class="w-36 h-36 bg-white p-1 rounded" />{/if}
+          <div class="text-xs font-mono space-y-1">
+            <div class="hud-label text-hud-dim">{$t('set.secret')}</div>
+            <div class="text-emerald-200 break-all">{setup.secret}</div>
           </div>
         </div>
+        <label class="block space-y-1">
+          <span class="hud-label">{$t('set.2faStep2')}</span>
+          <input class="hud-input" bind:value={code} placeholder="123456" />
+        </label>
+        <button class="hud-btn hud-btn-primary" on:click={enable} disabled={twofaBusy || !code}>{twofaBusy ? '…' : $t('set.confirmEnable')}</button>
       </div>
-    </div>
-  {/if}
+    {/if}
 
-  <section class="hud-panel p-5 space-y-3">
+    {#if backupCodes}
+      <div class="border border-neon-amber/40 rounded p-3 bg-neon-amber/5 space-y-2">
+        <div class="hud-label text-neon-amber">{$t('set.backupCodes')}</div>
+        <div class="font-mono text-xs grid grid-cols-2 gap-1">{#each backupCodes as c}<span class="text-emerald-200">{c}</span>{/each}</div>
+        <p class="text-[11px] text-hud-dim">{$t('set.backupHint')}</p>
+      </div>
+    {/if}
+    {#if twofaMsg}<div class="text-xs text-neon-green font-mono">{twofaMsg}</div>{/if}
+    {#if twofaErr}<div class="text-xs text-neon-red font-mono">{twofaErr}</div>{/if}
+  </section>
+<section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('ch.title', { n: channels.length })}</div>
     <p class="text-xs text-hud-dim">{$t('ch.hint')}</p>
 
@@ -580,5 +552,6 @@
     {/if}
     {#if chMsg}<div class="text-xs font-mono {chOk ? 'text-neon-green' : 'text-neon-red'}">{chMsg}</div>{/if}
   </section>
+    </div>
   </div>
 </div>
