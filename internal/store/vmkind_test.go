@@ -69,7 +69,7 @@ func TestDomainValidate_IPGuard(t *testing.T) {
 		{"203.0.113.99", true},
 		{"2a02:6b8::1", true},
 		{"example.top", false},
-		{"clinic.example.org", false},
+		{"clinic.example.org", false}, // RFC 2606 doc domain (was a real third-party site)
 	}
 	for _, c := range cases {
 		err := Domain{Name: c.name}.Validate()
