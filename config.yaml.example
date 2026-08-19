@@ -8,6 +8,8 @@ mode: local
 
 # Listen address:port. local -> 127.0.0.1, server -> 0.0.0.0.
 listen: "127.0.0.1:8443"
+# Rotating file sink for logs. Default: logs/vmpulse.log (10MB x3). "-" = stdout only.
+# log_file: "logs/vmpulse.log"
 
 # SQLite database file path (relative to the working directory).
 db_path: "data/vmpulse.sqlite"

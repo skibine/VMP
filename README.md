@@ -9,6 +9,31 @@ powerful enough for a homelabber.
 > Telegram), SSH terminal, events journal, 2FA/vault. Releases are cross-compiled binaries;
 > see `make build-windows` / the release pipeline notes in `.github/workflows/`.
 
+## Install (Linux, from a release)
+
+```bash
+# 1) grab the binary for your arch from github.com/skibine/VMP/releases (example: amd64;
+#    arm64 builds exist too)
+V=$(curl -s https://api.github.com/repos/skibine/VMP/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
+curl -LO "https://github.com/skibine/VMP/releases/download/$V/vmpulse_${V#v}_linux_amd64.tar.gz"
+tar xzf "vmpulse_${V#v}_linux_amd64.tar.gz" && cd "vmpulse_${V#v}_linux_amd64"
+
+# 2) one-shot host posture check (read-only; also available as a button on the login page)
+./vmpulse doctor
+
+# 3) run; first start prints a generated admin password to the console
+./vmpulse
+```
+
+Default UI: `http://127.0.0.1:8443` (local mode binds loopback only). Change the password
+after the first login, then set up 2FA and Telegram alerts as you go.
+
+To run it on a remote VPS the safe way, keep `mode: local` and use an SSH tunnel
+(`ssh -L 8443:127.0.0.1:8443 user@vps` — the UI stays on your localhost, nothing exposed).
+`mode: server` binds `0.0.0.0` for use behind a reverse proxy with TLS; run `vmpulse doctor`
+first and read the two-plane notes below. Logs rotate in `logs/vmpulse.log` (10MB x3);
+`log_file: "-"` in config.yaml disables the file sink.
+
 ## What it does
 
 - **Fleet monitoring (Plane A, credential-free):** liveness + TCP/HTTP/ping/DNS checks with
@@ -70,7 +95,7 @@ Database migrations apply automatically on start; a `.bak` snapshot is taken bef
 |---|---|
 | `cmd/vmpulse/` | entry point (config → store → engine → api → tgchat), `doctor` subcommand |
 | `internal/config/` | `config.yaml` loader, `local`/`server` modes |
-| `internal/store/` | SQLite (pure-Go `modernc.org/sqlite`), WAL, embedded migrations (0001–0030) |
+| `internal/store/` | SQLite (pure-Go `modernc.org/sqlite`), WAL, embedded migrations (0001–0031) |
 | `internal/monitor/` | check engine: tcp/http/ping/dns/dnsbl/whois/tls, port scans, exposures, site info, RDAP |
 | `internal/alerts/` | rule evaluator (edge-triggered + cooldowns), delivery channels (telegram/webhook/in-app), domain reminders |
 | `internal/ai/` | LLM agent: provider-agnostic client, tool registry (~40 tools), shared chat history |
@@ -95,4 +120,4 @@ Database migrations apply automatically on start; a `.bak` snapshot is taken bef
 
 ## License
 
-AGPLv3.
+MIT — see [LICENSE](LICENSE). Free to use, modify and redistribute.
