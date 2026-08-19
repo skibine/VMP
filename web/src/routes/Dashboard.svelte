@@ -37,6 +37,21 @@
   function onVmDeleted() { selKind = null; selId = null; listKey++ }
   function onDomainChanged() { selKind = null; selId = null; listKey++ }
 
+  // Graceful server stop (moved from Settings to the header, next to LOGOUT - the natural
+  // "power" spot; the hint lives in a hover tooltip instead of a whole Settings section).
+  let stopping = false
+  async function stopServer() {
+    if (!confirm($t('set.stopConfirm'))) return
+    stopping = true
+    try {
+      await api.shutdownServer()
+    } catch (_) {
+      stopping = false
+      return
+    }
+    setTimeout(() => location.reload(), 4000)
+  }
+
   async function logout() {
     await api.logout()
     doLogout()
@@ -100,6 +115,18 @@
       <button class="hud-btn" on:click={toggleTheme} title="toggle light/dark theme">{$themeLight ? $t('nav.themeDark') : $t('nav.themeLight')}</button>
       <span class="hud-label">{$t('nav.user')}&nbsp;{$user?.username ?? '—'}</span>
       <button class="hud-btn" on:click={logout}>{$t('nav.logout')}</button>
+      <div class="relative group shrink-0">
+        <button
+          class="hud-btn border-neon-red/40 text-neon-red hover:border-neon-red/70"
+          on:click={stopServer}
+          disabled={stopping}
+          aria-label={$t('set.stopBtn')}
+        >{stopping ? '…' : $t('set.stopBtn')}</button>
+        <div class="absolute right-0 top-full mt-1 w-72 hud-panel p-2.5 z-[80] hidden group-hover:block pointer-events-none">
+          <div class="hud-label text-neon-red">// {$t('set.stopTitle')}</div>
+          <p class="text-[10px] text-hud-dim leading-snug mt-1">{$t('set.stopHint')}</p>
+        </div>
+      </div>
     </div>
   </header>
 

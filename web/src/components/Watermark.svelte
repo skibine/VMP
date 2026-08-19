@@ -11,6 +11,6 @@
   src="/logo.png"
   alt=""
   aria-hidden="true"
-  class="pointer-events-none select-none fixed z-0 right-6 bottom-6 w-[440px] max-w-[46vw] opacity-[0.055]"
+  class="pointer-events-none select-none fixed z-0 right-6 bottom-6 w-[440px] max-w-[46vw] opacity-[0.35]"
   draggable="false"
 />

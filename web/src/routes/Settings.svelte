@@ -236,28 +236,6 @@
     } catch (e) { chMsg = e.message } finally { chBusy = false }
   }
 
-  // Graceful stop (windowless builds: the only stop affordance besides taskkill).
-  let stopping = false
-  let stopMsg = ''
-  async function stopServer() {
-    if (!confirm($t('set.stopConfirm'))) return
-    stopping = true
-    stopMsg = ''
-    try {
-      await api.shutdownServer()
-      stopMsg = $t('set.stopSent')
-    } catch (e) {
-      stopping = false
-      stopMsg = $t('set.stopFail')
-      return
-    }
-    // BUG_FIX_CONTEXT: this callback previously read $appVersion, which Settings.svelte does
-    // NOT import - Svelte hoisted it into the component's store subscriptions, so the whole
-    // Settings component crashed with ReferenceError at mount ("settings page freezes").
-    // Vite does not catch this (runtime error, not compile). reload() needs no store.
-    setTimeout(() => location.reload(), 4000)
-  }
-
   onMount(loadAI)
   onMount(loadChannels)
 
@@ -546,15 +524,6 @@
       </div>
     {/if}
     {#if chMsg}<div class="text-xs font-mono {chOk ? 'text-neon-green' : 'text-neon-red'}">{chMsg}</div>{/if}
-  </section>
-
-  <section class="hud-panel p-5 space-y-3 border-neon-red/30">
-    <div class="hud-label text-neon-red">// {$t('set.stopTitle')}</div>
-    <p class="text-xs text-hud-dim">{$t('set.stopHint')}</p>
-    <div class="flex items-center gap-2">
-      <button class="hud-btn border-neon-red/40 text-neon-red" on:click={stopServer} disabled={stopping}>{stopping ? '…' : $t('set.stopBtn')}</button>
-      {#if stopMsg}<span class="text-xs font-mono text-neon-amber">{stopMsg}</span>{/if}
-    </div>
   </section>
   </div>
 </div>
