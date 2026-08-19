@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/skibine/vm-pulse/internal/audit"
 	"github.com/skibine/vm-pulse/internal/auth"

@@ -14,7 +14,7 @@
     "postcss": "^8.4.49",
     "svelte": "^4.2.19",
     "tailwindcss": "^3.4.17",
-    "vite": "^5.4.11"
+    "vite": "^6.4.3"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

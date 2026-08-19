@@ -23,8 +23,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/coder/websocket"
 	gossh "golang.org/x/crypto/ssh"
-	"nhooyr.io/websocket"
 
 	"github.com/skibine/vm-pulse/internal/logging"
 )
