@@ -212,7 +212,15 @@ func main() {
 		ai.CheckTools(s)...),
 		ai.FleetMutators(s)...),
 		ai.ActionTools(s, &sshActionExec{dialer: sshDialer, st: s})...)...)
-	agent := &ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger}
+	agent := &ai.Agent{Provider: &ai.SettingsProvider{Store: s}, Tools: aiRegistry, Logger: logger,
+		CustomPrompt: func(ctx context.Context) (string, string) {
+			mode, _ := s.GetSetting(ctx, store.SettingAISystemPromptMode)
+			if mode != "replace" {
+				mode = "append"
+			}
+			text, _ := s.GetSetting(ctx, store.SettingAISystemPrompt)
+			return mode, text
+		}}
 	server.WithAgent(agent)
 
 	// Telegram chat bridge: the SAME agent as a chat frontend (opt-in per telegram channel via

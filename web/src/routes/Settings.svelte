@@ -6,7 +6,7 @@
 
   // region Settings [DOMAIN(9): UI; CONCEPT(7]: GlobalSettings; TECH(6]: svelte]
   // Global settings only (AI provider). Per-VM credentials live in the VM detail pane now.
-  let ai = { api_url: '', model: '', has_key: false, auto_approve: false }
+  let ai = { api_url: '', model: '', has_key: false, auto_approve: false, system_prompt: '', prompt_mode: 'append' }
   let aiKey = '' // leave empty to keep existing
   let aiMsg = ''
   let aiOk = false
@@ -76,6 +76,26 @@
     const id = e.currentTarget.value
     const p = providers.find((x) => x.id === id) || providers[providers.length - 1]
     applyPreset(p)
+  }
+
+  // Advanced: operator-tunable agent system prompt (append keeps the built-in safety
+  // baseline, replace swaps it entirely - the operator's instance, their call).
+  let spOpen = false
+  let spText = ''
+  let spMode = 'append'
+  let spBusy = false
+  function openSP() {
+    spText = ai.system_prompt || ''
+    spMode = ai.prompt_mode || 'append'
+    spOpen = true
+  }
+  async function saveSP() {
+    spBusy = true
+    try {
+      await api.updateAISettings({ system_prompt: spText, prompt_mode: spMode })
+      spOpen = false
+      await loadAI()
+    } finally { spBusy = false }
   }
 
   async function loadAI() {
@@ -459,8 +479,43 @@
       <span class="hud-label {ai.auto_approve ? 'text-neon-amber' : ''}">{$t('set.autoApprove')}</span>
       <span class="text-[11px] text-hud-dim">{$t('set.autoApproveHint')}</span>
     </label>
+
+    <div class="pt-1">
+      <button class="hud-btn !py-1" on:click={openSP}>{$t('set.spBtn')}</button>
+      {#if ai.system_prompt}<span class="text-[10px] font-mono text-neon-green ml-2">// {ai.prompt_mode}, {ai.system_prompt.length}b</span>{/if}
+    </div>
     </div>
   </section>
+
+  {#if spOpen}
+    <div class="fixed inset-0 z-[95] bg-black/60 flex items-center justify-center p-4" on:click={() => (spOpen = false)} on:contextmenu|preventDefault={() => (spOpen = false)}>
+      <div class="hud-panel w-full max-w-2xl p-5 space-y-3 relative" on:click|stopPropagation>
+        <div class="hud-label text-neon-cyan">// {$t('set.spTitle')}</div>
+        <p class="text-[11px] text-hud-dim leading-snug">{$t('set.spHint')}</p>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs font-mono">
+            <input type="radio" class="accent-neon-green" name="spmode" value="append" bind:group={spMode} />
+            <span class={spMode === 'append' ? 'text-neon-green' : 'text-hud-dim'}>{$t('set.spAppend')}</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer text-xs font-mono">
+            <input type="radio" class="accent-neon-red" name="spmode" value="replace" bind:group={spMode} />
+            <span class={spMode === 'replace' ? 'text-neon-red' : 'text-hud-dim'}>{$t('set.spReplace')}</span>
+          </label>
+        </div>
+        {#if spMode === 'replace'}
+          <div class="text-[11px] font-mono text-neon-amber">{$t('set.spReplaceWarn')}</div>
+        {/if}
+        <textarea class="hud-input w-full h-56 font-mono text-xs leading-snug" placeholder={$t('set.spPlaceholder')} bind:value={spText} maxlength="16384"></textarea>
+        <div class="flex items-center gap-2 pt-1 border-t border-hud-line">
+          <span class="text-[9px] font-mono text-neon-amber/70 select-none" title="easter egg">Make no mistakes!</span>
+          <div class="ml-auto flex items-center gap-2">
+            <button class="hud-btn" on:click={() => (spOpen = false)}>{$t('g.cancel')}</button>
+            <button class="hud-btn hud-btn-primary" on:click={saveSP} disabled={spBusy}>{spBusy ? '…' : $t('g.ok')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <section class="hud-panel p-5 space-y-3">
     <div class="hud-label text-neon-cyan">{$t('ch.title', { n: channels.length })}</div>

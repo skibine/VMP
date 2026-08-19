@@ -85,6 +85,22 @@ body {
       linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
     background-size: 28px 28px;
   }
+  /* Big faint logo ON the cell field, UNDER every panel: the pre-faded
+     logo-wm.png (alpha baked at 0.35) is layered ABOVE the grid lines but is
+     still just a section background - every hud-panel card paints over it.
+     background-attachment: scroll keeps it glued to the section box (it does
+     not scroll away with the content). Center-bottom: clear of both the
+     sidebar and the chat column on any viewport. */
+  .hud-wm {
+    background-image:
+      url('/logo-wm.png'),
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: min(440px, 42vw) auto, 28px 28px, 28px 28px;
+    background-position: center bottom, 0 0, 0 0;
+    background-repeat: no-repeat, repeat, repeat;
+    background-attachment: scroll, scroll, scroll;
+  }
   .scan {
     position: relative;
     overflow: hidden;

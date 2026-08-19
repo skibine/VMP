@@ -35,6 +35,11 @@ type Agent struct {
 	MaxIters     int
 	Logger       *slog.Logger
 	SystemPrompt string
+
+	// CustomPrompt, when wired (main reads the ai_system_prompt* settings), layers the
+	// operator's prompt on top of the built-in one: mode "append" keeps the safety baseline,
+	// mode "replace" swaps it entirely (the operator's instance, the operator's call).
+	CustomPrompt func(ctx context.Context) (mode, text string)
 }
 
 func (a *Agent) maxIters() int {
@@ -44,7 +49,22 @@ func (a *Agent) maxIters() int {
 	return a.MaxIters
 }
 
-func (a *Agent) systemPrompt() string {
+func (a *Agent) systemPrompt(ctx context.Context) string {
+	base := a.builtinPrompt()
+	if a.CustomPrompt != nil {
+		mode, text := a.CustomPrompt(ctx)
+		text = strings.TrimSpace(text)
+		if text != "" {
+			if mode == "replace" {
+				return text
+			}
+			return base + "\n\n# OPERATOR SYSTEM PROMPT (custom, appended)\n" + text
+		}
+	}
+	return base
+}
+
+func (a *Agent) builtinPrompt() string {
 	if strings.TrimSpace(a.SystemPrompt) != "" {
 		return a.SystemPrompt
 	}
@@ -106,7 +126,7 @@ func (a *Agent) systemPrompt() string {
 // @complexity 6
 // endregion FUNC_Ask
 func (a *Agent) Ask(ctx context.Context, message string, history []Message) (AskReply, error) {
-	msgs := []Message{{Role: "system", Content: a.systemPrompt()}}
+	msgs := []Message{{Role: "system", Content: a.systemPrompt(ctx)}}
 	msgs = append(msgs, history...)
 	msgs = append(msgs, Message{Role: "user", Content: message})
 

@@ -80,20 +80,29 @@ func (a *crudAPI) getAISettings(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, "getAISettings", err)
 		return
 	}
+	sp, _ := a.st.GetSetting(r.Context(), store.SettingAISystemPrompt)
+	spMode, _ := a.st.GetSetting(r.Context(), store.SettingAISystemPromptMode)
+	if spMode != "replace" {
+		spMode = "append"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"api_url":      cfg.APIURL,
-		"model":        cfg.Model,
-		"has_key":      cfg.APIKey != "",
-		"auto_approve": a.st.IsAIAutoApprove(r.Context()),
+		"api_url":       cfg.APIURL,
+		"model":         cfg.Model,
+		"has_key":       cfg.APIKey != "",
+		"auto_approve":  a.st.IsAIAutoApprove(r.Context()),
+		"system_prompt": sp,
+		"prompt_mode":   spMode,
 	})
 }
 
 func (a *crudAPI) updateAISettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		APIURL      string `json:"api_url"`
-		APIKey      string `json:"api_key"`
-		Model       string `json:"model"`
-		AutoApprove *bool  `json:"auto_approve"` // pointer so false is distinguishable from omitted
+		APIURL      string  `json:"api_url"`
+		APIKey      string  `json:"api_key"`
+		Model       string  `json:"model"`
+		AutoApprove *bool   `json:"auto_approve"` // pointer so false is distinguishable from omitted
+		SystemPmt   *string `json:"system_prompt"`
+		PromptMode  *string `json:"prompt_mode"` // "append" | "replace"
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -114,6 +123,22 @@ func (a *crudAPI) updateAISettings(w http.ResponseWriter, r *http.Request) {
 			val = "true"
 		}
 		_ = a.st.SetSetting(r.Context(), store.SettingAIAutoApprove, val, false)
+	}
+	if body.SystemPmt != nil {
+		sp := *body.SystemPmt
+		if len(sp) > 16*1024 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "system prompt too large (max 16KB)"})
+			return
+		}
+		_ = a.st.SetSetting(r.Context(), store.SettingAISystemPrompt, sp, false)
+	}
+	if body.PromptMode != nil {
+		mode := *body.PromptMode
+		if mode != "append" && mode != "replace" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "prompt_mode must be append|replace"})
+			return
+		}
+		_ = a.st.SetSetting(r.Context(), store.SettingAISystemPromptMode, mode, false)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

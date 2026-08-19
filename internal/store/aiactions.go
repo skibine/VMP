@@ -35,6 +35,13 @@ type AIAction struct {
 // SettingAIAutoApprove toggles whether AI-proposed actions execute without operator approval.
 const SettingAIAutoApprove = "ai_action_auto_approve"
 
+// Operator-tunable system prompt (Settings > AI > advanced). Mode: "append" (default, keeps the
+// built-in safety prompt) or "replace" (operator takes full responsibility).
+const (
+	SettingAISystemPrompt     = "ai_system_prompt"
+	SettingAISystemPromptMode = "ai_system_prompt_mode"
+)
+
 // CreateAIAction inserts a pending action and returns its id.
 func (s *Store) CreateAIAction(ctx context.Context, a AIAction) (int64, error) {
 	res, err := s.DB.ExecContext(ctx, `
